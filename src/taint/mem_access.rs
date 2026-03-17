@@ -44,4 +44,10 @@ impl MemAccessIndex {
     pub fn total_addresses(&self) -> usize {
         self.index.len()
     }
+
+    pub fn iter_all(&self) -> impl Iterator<Item = (u64, &MemAccessRecord)> + '_ {
+        self.index.iter().flat_map(|(&addr, records)| {
+            records.iter().map(move |r| (addr, r))
+        })
+    }
 }
