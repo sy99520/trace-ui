@@ -206,8 +206,7 @@ fn parse_line_gumtrace_inner(raw: &str, extract_regs: bool) -> Option<ParsedLine
     let semicolon_pos = memchr::memchr(b';', &bytes[insn_start..]).map(|p| insn_start + p);
     let insn_end = semicolon_pos.unwrap_or(bytes.len());
 
-    // SAFETY: trace lines are ASCII
-    let insn_text = unsafe { std::str::from_utf8_unchecked(&bytes[insn_start..insn_end]) }.trim();
+    let insn_text = std::str::from_utf8(&bytes[insn_start..insn_end]).ok()?.trim();
 
     if insn_text.is_empty() {
         return None;

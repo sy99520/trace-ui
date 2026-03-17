@@ -116,8 +116,21 @@ pub fn scan_unified(
             line_end
         };
 
-        // SAFETY: trace lines are ASCII (ARM64 disassembly text from unidbg)
-        let raw_line = unsafe { std::str::from_utf8_unchecked(&data[pos..end]) };
+        let raw_line = match std::str::from_utf8(&data[pos..end]) {
+            Ok(s) => s,
+            Err(_) => {
+                // 非 UTF-8 行（如二进制数据），跳过
+                li_builder.add_line(pos as u64);
+                pos = if line_end < len { line_end + 1 } else { len };
+                state.deps.start_row();
+                state.init_mem_loads.push(false);
+                state.line_count += 1;
+                if state.line_count % CHECKPOINT_INTERVAL == 0 {
+                    reg_ckpts.save_checkpoint(&reg_values);
+                }
+                continue;
+            }
+        };
 
         // LineIndex: 记录行偏移
         li_builder.add_line(pos as u64);
