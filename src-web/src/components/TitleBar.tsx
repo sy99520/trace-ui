@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -78,6 +78,53 @@ export default function TitleBar({ onOpenFile, onCloseFile, onRebuildIndex, onSe
   const [recentHover, setRecentHover] = useState(false);
   const [highlightHover, setHighlightHover] = useState(false);
   const [recentCtxMenu, setRecentCtxMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+
+  // ── 搜索历史 ──
+  const SEARCH_HISTORY_KEY = "titlebar-search-history";
+  const MAX_SEARCH_HISTORY = 20;
+  const [searchHistoryList, setSearchHistoryList] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]"); } catch { return []; }
+  });
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
+  const searchWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showSearchHistory) return;
+    const handler = (e: MouseEvent) => {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
+        setShowSearchHistory(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSearchHistory]);
+
+  const addSearchHistory = useCallback((query: string) => {
+    if (!query.trim()) return;
+    setSearchHistoryList(prev => {
+      const next = [query.trim(), ...prev.filter(h => h !== query.trim())].slice(0, MAX_SEARCH_HISTORY);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const removeSearchHistoryItem = useCallback((item: string) => {
+    setSearchHistoryList(prev => {
+      const next = prev.filter(h => h !== item);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const clearAllSearchHistory = useCallback(() => {
+    setSearchHistoryList([]);
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+    setShowSearchHistory(false);
+  }, []);
+
+  const filteredSearchHistory = searchInput.trim()
+    ? searchHistoryList.filter(h => h !== searchInput.trim() && h.toLowerCase().includes(searchInput.toLowerCase()))
+    : searchHistoryList;
 
   const handleOpen = useCallback(async () => {
     try {
@@ -369,13 +416,20 @@ export default function TitleBar({ onOpenFile, onCloseFile, onRebuildIndex, onSe
           title={`Forward (${isMac ? "⌘+⌥+→" : "Ctrl+Alt+→"})`}
         >▶</button>
 
-        <div style={{ position: "relative", flex: 1, maxWidth: 420, minWidth: 180 }}>
+        <div ref={searchWrapperRef} style={{ position: "relative", flex: 1, maxWidth: 420, minWidth: 180 }}>
           <input
             type="text"
             placeholder="Search text or /regex/"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && isLoaded && onSearch(searchInput)}
+            onFocus={() => setShowSearchHistory(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && isLoaded) {
+                onSearch(searchInput);
+                addSearchHistory(searchInput);
+                setShowSearchHistory(false);
+              }
+            }}
             style={{
               width: "100%",
               padding: "4px 26px 4px 8px",
@@ -389,7 +443,7 @@ export default function TitleBar({ onOpenFile, onCloseFile, onRebuildIndex, onSe
           />
           {searchInput && (
             <button
-              onClick={() => setSearchInput("")}
+              onClick={() => { setSearchInput(""); setShowSearchHistory(false); }}
               style={{
                 position: "absolute",
                 right: 4,
@@ -413,6 +467,52 @@ export default function TitleBar({ onOpenFile, onCloseFile, onRebuildIndex, onSe
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               title="Clear search"
             >✕</button>
+          )}
+          {showSearchHistory && filteredSearchHistory.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, width: "100%", marginTop: 2,
+              background: "var(--bg-dialog)", border: "1px solid var(--border-color)",
+              borderRadius: 4, zIndex: 100, maxHeight: 200, overflowY: "auto",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}>
+              {filteredSearchHistory.map(item => (
+                <div
+                  key={item}
+                  style={{
+                    display: "flex", alignItems: "center", padding: "4px 8px", fontSize: 12,
+                    cursor: "pointer", color: "var(--text-primary)",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-selected)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => {
+                    setSearchInput(item);
+                    setShowSearchHistory(false);
+                    if (isLoaded) { onSearch(item); }
+                  }}
+                >
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</span>
+                  <span
+                    onClick={e => { e.stopPropagation(); removeSearchHistoryItem(item); }}
+                    style={{
+                      marginLeft: 4, color: "var(--text-secondary)", fontSize: 13, lineHeight: 1,
+                      width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                      borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = "var(--text-primary)")}
+                    onMouseLeave={e => (e.currentTarget.style.color = "var(--text-secondary)")}
+                  >×</span>
+                </div>
+              ))}
+              <div
+                style={{
+                  padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
+                  borderTop: "1px solid var(--border-color)", cursor: "pointer", textAlign: "center",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-selected)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+                onClick={clearAllSearchHistory}
+              >Clear All</div>
+            </div>
           )}
         </div>
 

@@ -63,6 +63,7 @@ fn main() {
             commands::strings::get_string_xrefs,
             commands::strings::scan_strings,
             commands::strings::cancel_scan_strings,
+            commands::browse::get_consumed_seqs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

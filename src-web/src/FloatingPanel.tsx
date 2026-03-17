@@ -18,6 +18,7 @@ const PANEL_TITLES: Record<string, string> = {
   strings: "Strings",
   "string-detail": "String Detail",
   "string-xrefs": "XRefs",
+  "call-info": "Call Info",
 };
 
 interface SyncState {
@@ -190,6 +191,8 @@ export default function FloatingPanel({ panel }: { panel: string }) {
         return <StringDetailPanel />;
       case "string-xrefs":
         return <StringXRefsPanel />;
+      case "call-info":
+        return <CallInfoContent />;
       default:
         return (
           <div style={{
@@ -327,6 +330,55 @@ function FloatingSearchContent({
           {searchStatus}
         </div>
       )}
+    </div>
+  );
+}
+
+function CallInfoContent() {
+  const [info, setInfo] = useState<{ text: string; isJni: boolean } | null>(null);
+
+  // 事件方案：先注册数据监听，再发送 ready 信号
+  useEffect(() => {
+    const unlisten = listen<{ text: string; isJni: boolean }>("call-info:init-data", (e) => {
+      setInfo(e.payload);
+    });
+    const winLabel = getCurrentWindow().label;
+    emit(`call-info:ready:${winLabel}`);
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
+  // Esc 关闭窗口
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        getCurrentWindow().close();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  if (!info) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>No data</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      flex: 1,
+      overflow: "auto",
+      padding: "8px 12px",
+      fontSize: 12,
+      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+      color: "var(--text-primary, #abb2bf)",
+      whiteSpace: "pre",
+      borderTop: `2px solid ${info.isJni ? "#c792ea" : "#56d4dd"}`,
+    }}>
+      {info.text}
     </div>
   );
 }

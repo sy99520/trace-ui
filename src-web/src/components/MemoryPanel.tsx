@@ -32,6 +32,8 @@ const BYTES_PER_LINE = 16;
 const DEFAULT_LENGTH = 1024;
 const HISTORY_ROW_HEIGHT = 20;
 const HEX_ROW_HEIGHT = 20;
+const ADDR_HISTORY_KEY = "memory-addr-search-history";
+const MAX_ADDR_HISTORY = 20;
 
 function formatHexByte(byte: number): string {
   return byte.toString(16).padStart(2, "0").toUpperCase();
@@ -76,6 +78,13 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
   const [history, setHistory] = useState<MemHistoryRecord[]>([]);
   const [historyAddr, setHistoryAddr] = useState<string | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+
+  // ── 地址搜索历史 ──
+  const [addrHistory, setAddrHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(ADDR_HISTORY_KEY) || "[]"); } catch { return []; }
+  });
+  const [showAddrHistory, setShowAddrHistory] = useState(false);
+  const addrInputWrapperRef = useRef<HTMLDivElement>(null);
 
 
   // hex dump 容器高度裁剪到行高整数倍，避免部分行露出
@@ -268,6 +277,44 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
     })) as unknown as TraceLine[];
   }, [history]);
 
+  // ── 地址搜索历史：点击外部关闭 ──
+  useEffect(() => {
+    if (!showAddrHistory) return;
+    const handler = (e: MouseEvent) => {
+      if (addrInputWrapperRef.current && !addrInputWrapperRef.current.contains(e.target as Node)) {
+        setShowAddrHistory(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showAddrHistory]);
+
+  const removeAddrHistoryItem = useCallback((item: string) => {
+    setAddrHistory(prev => {
+      const next = prev.filter(h => h !== item);
+      localStorage.setItem(ADDR_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const clearAllAddrHistory = useCallback(() => {
+    setAddrHistory([]);
+    localStorage.removeItem(ADDR_HISTORY_KEY);
+    setShowAddrHistory(false);
+  }, []);
+
+  const addAddrToHistory = useCallback((addr: string) => {
+    setAddrHistory(prev => {
+      const next = [addr, ...prev.filter(h => h !== addr)].slice(0, MAX_ADDR_HISTORY);
+      localStorage.setItem(ADDR_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const filteredAddrHistory = inputAddr.trim()
+    ? addrHistory.filter(h => h !== inputAddr.trim() && h.toLowerCase().includes(inputAddr.toLowerCase()))
+    : addrHistory;
+
   const handleGo = useCallback(() => {
     const trimmed = inputAddr.trim();
     if (!trimmed) return;
@@ -279,7 +326,9 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
     setAutoTrack(false);
     setCurrentAddr(clean);
     setError(null);
-  }, [inputAddr]);
+    addAddrToHistory(clean);
+    setShowAddrHistory(false);
+  }, [inputAddr, addAddrToHistory]);
 
   // 高亮行变化时自动滚动到可见位置
   useEffect(() => {
@@ -387,12 +436,13 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
         />
         Auto
       </label>
-      <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      <div ref={addrInputWrapperRef} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
         <input
           type="text"
           placeholder="Jump to address (hex)"
           value={inputAddr}
           onChange={(e) => setInputAddr(e.target.value)}
+          onFocus={() => setShowAddrHistory(true)}
           onKeyDown={(e) => e.key === "Enter" && handleGo()}
           style={{
             width: 164, padding: inputAddr ? "1px 20px 1px 6px" : "1px 6px",
@@ -403,13 +453,61 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
         />
         {inputAddr && (
           <span
-            onClick={() => { setInputAddr(""); setError(null); }}
+            onClick={() => { setInputAddr(""); setError(null); setShowAddrHistory(false); }}
             style={{
               position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
               cursor: "pointer", color: "var(--text-secondary)", fontSize: 13,
               lineHeight: 1, userSelect: "none",
             }}
           >×</span>
+        )}
+        {showAddrHistory && filteredAddrHistory.length > 0 && (
+          <div style={{
+            position: "absolute", top: "100%", left: 0, width: "100%", marginTop: 2,
+            background: "var(--bg-dialog)", border: "1px solid var(--border-color)",
+            borderRadius: 4, zIndex: 100, maxHeight: 200, overflowY: "auto",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          }}>
+            {filteredAddrHistory.map(item => (
+              <div
+                key={item}
+                style={{
+                  display: "flex", alignItems: "center", padding: "4px 8px", fontSize: 12,
+                  cursor: "pointer", color: "var(--text-primary)",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-selected)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                onClick={() => {
+                  setInputAddr(item);
+                  setShowAddrHistory(false);
+                  setAutoTrack(false);
+                  setCurrentAddr(item);
+                  setError(null);
+                }}
+              >
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>{item}</span>
+                <span
+                  onClick={e => { e.stopPropagation(); removeAddrHistoryItem(item); }}
+                  style={{
+                    marginLeft: 4, color: "var(--text-secondary)", fontSize: 13, lineHeight: 1,
+                    width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                    borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "var(--text-primary)")}
+                  onMouseLeave={e => (e.currentTarget.style.color = "var(--text-secondary)")}
+                >×</span>
+              </div>
+            ))}
+            <div
+              style={{
+                padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
+                borderTop: "1px solid var(--border-color)", cursor: "pointer", textAlign: "center",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-selected)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+              onClick={clearAllAddrHistory}
+            >Clear All</div>
+          </div>
         )}
       </div>
     </div>

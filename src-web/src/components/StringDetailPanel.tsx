@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { StringRecordDto } from "../types/trace";
 
 export default function StringDetailPanel() {
-  // 从 URL 参数读取记录数据（由 StringsPanel 双击时写入）
-  const [record] = useState<StringRecordDto | null>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const data = params.get("data");
-      if (data) return JSON.parse(decodeURIComponent(data));
-    } catch (e) {
-      console.error("Failed to parse string-detail data from URL:", e);
-    }
-    return null;
-  });
+  const [record, setRecord] = useState<StringRecordDto | null>(null);
+
+  // 事件方案：先注册数据监听，再发送 ready 信号
+  useEffect(() => {
+    const unlisten = listen<StringRecordDto>("string-detail:init-data", (e) => {
+      setRecord(e.payload);
+    });
+    const winLabel = getCurrentWindow().label;
+    emit(`string-detail:ready:${winLabel}`);
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
   const [mode, setMode] = useState<"text" | "hex">("hex");
   const [highlight, setHighlight] = useState<Set<number>>(new Set());
   const [selecting, setSelecting] = useState(false);

@@ -14,6 +14,9 @@ function isHexAddress(input: string): boolean {
   return /[a-fA-F]/.test(input) && /^[0-9a-fA-F]+$/.test(input);
 }
 
+const GOTO_HISTORY_KEY = "goto-search-history";
+const MAX_GOTO_HISTORY = 20;
+
 export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLines }: Props) {
   const [input, setInput] = useState("");
   const [matches, setMatches] = useState<SearchMatch[]>([]);
@@ -21,6 +24,51 @@ export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLine
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // ── 搜索历史 ──
+  const [gotoHistory, setGotoHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(GOTO_HISTORY_KEY) || "[]"); } catch { return []; }
+  });
+  const [showGotoHistory, setShowGotoHistory] = useState(false);
+  const inputWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showGotoHistory) return;
+    const handler = (e: MouseEvent) => {
+      if (inputWrapperRef.current && !inputWrapperRef.current.contains(e.target as Node)) {
+        setShowGotoHistory(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showGotoHistory]);
+
+  const addGotoHistory = useCallback((query: string) => {
+    if (!query.trim()) return;
+    setGotoHistory(prev => {
+      const next = [query.trim(), ...prev.filter(h => h !== query.trim())].slice(0, MAX_GOTO_HISTORY);
+      localStorage.setItem(GOTO_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const removeGotoHistoryItem = useCallback((item: string) => {
+    setGotoHistory(prev => {
+      const next = prev.filter(h => h !== item);
+      localStorage.setItem(GOTO_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const clearAllGotoHistory = useCallback(() => {
+    setGotoHistory([]);
+    localStorage.removeItem(GOTO_HISTORY_KEY);
+    setShowGotoHistory(false);
+  }, []);
+
+  const filteredGotoHistory = input.trim()
+    ? gotoHistory.filter(h => h !== input.trim() && h.toLowerCase().includes(input.toLowerCase()))
+    : gotoHistory;
 
   // 自动聚焦
   useEffect(() => {
@@ -66,9 +114,11 @@ export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLine
   }, [input, sessionId]);
 
   const jumpAndClose = useCallback((seq: number) => {
+    addGotoHistory(input.trim());
+    setShowGotoHistory(false);
     onJumpToSeq(seq);
     onClose();
-  }, [onJumpToSeq, onClose]);
+  }, [onJumpToSeq, onClose, input, addGotoHistory]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -134,22 +184,83 @@ export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLine
         overflow: "hidden",
       }}>
         {/* 输入框 */}
-        <div style={{ padding: "10px 12px 6px", flexShrink: 0 }}>
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="行号 (如 12345) 或地址 (如 0x406bd430)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            style={{
-              width: "100%", padding: "6px 10px",
-              background: "var(--bg-input)", color: "var(--text-primary)",
-              border: "1px solid var(--border-color)", borderRadius: 4,
-              fontFamily: "var(--font-mono)", fontSize: "var(--font-size-sm)",
-              outline: "none",
-            }}
-          />
+        <div ref={inputWrapperRef} style={{ padding: "10px 12px 6px", flexShrink: 0, position: "relative" }}>
+          <div style={{ position: "relative" }}>
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Line number (e.g. 12345) or address (e.g. 0x406bd430)"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onFocus={() => setShowGotoHistory(true)}
+              onKeyDown={handleKeyDown}
+              style={{
+                width: "100%", padding: "6px 26px 6px 10px",
+                background: "var(--bg-input)", color: "var(--text-primary)",
+                border: "1px solid var(--border-color)", borderRadius: 4,
+                fontFamily: "var(--font-mono)", fontSize: "var(--font-size-sm)",
+                outline: "none",
+              }}
+            />
+            {input && (
+              <span
+                onClick={() => { setInput(""); setShowGotoHistory(false); }}
+                style={{
+                  position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                  cursor: "pointer", color: "var(--text-secondary)", fontSize: 14, lineHeight: 1,
+                  width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: "50%",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = "var(--text-primary)")}
+                onMouseLeave={e => (e.currentTarget.style.color = "var(--text-secondary)")}
+              >×</span>
+            )}
+          </div>
+          {showGotoHistory && filteredGotoHistory.length > 0 && (
+            <div style={{
+              position: "absolute", left: 12, right: 12, top: "100%", marginTop: 2,
+              background: "var(--bg-dialog)", border: "1px solid var(--border-color)",
+              borderRadius: 4, zIndex: 100, maxHeight: 200, overflowY: "auto",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}>
+              {filteredGotoHistory.map(item => (
+                <div
+                  key={item}
+                  style={{
+                    display: "flex", alignItems: "center", padding: "4px 8px", fontSize: 12,
+                    cursor: "pointer", color: "var(--text-primary)",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-selected)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => {
+                    setInput(item);
+                    setShowGotoHistory(false);
+                  }}
+                >
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>{item}</span>
+                  <span
+                    onClick={e => { e.stopPropagation(); removeGotoHistoryItem(item); }}
+                    style={{
+                      marginLeft: 4, color: "var(--text-secondary)", fontSize: 13, lineHeight: 1,
+                      width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                      borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = "var(--text-primary)")}
+                    onMouseLeave={e => (e.currentTarget.style.color = "var(--text-secondary)")}
+                  >×</span>
+                </div>
+              ))}
+              <div
+                style={{
+                  padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
+                  borderTop: "1px solid var(--border-color)", cursor: "pointer", textAlign: "center",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-selected)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+                onClick={clearAllGotoHistory}
+              >Clear All</div>
+            </div>
+          )}
         </div>
 
         {/* 提示/结果 */}
@@ -157,12 +268,12 @@ export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLine
           {isLineNum && trimmed.length > 0 ? (
             <div style={{ padding: "8px 12px", color: lineValid ? "var(--text-primary)" : "var(--reg-changed)" }}>
               {lineValid
-                ? <span>按 Enter 跳转到第 <b>{parsedLine.toLocaleString()}</b> 行</span>
-                : <span>行号超出范围 (1 ~ {totalLines.toLocaleString()})</span>
+                ? <span>Press Enter to go to line <b>{parsedLine.toLocaleString()}</b></span>
+                : <span>Line number out of range (1 ~ {totalLines.toLocaleString()})</span>
               }
             </div>
           ) : searching ? (
-            <div style={{ padding: "8px 12px", color: "var(--text-secondary)" }}>搜索中...</div>
+            <div style={{ padding: "8px 12px", color: "var(--text-secondary)" }}>Searching...</div>
           ) : matches.length > 0 ? (
             <div ref={listRef}>
               {matches.map((m, i) => (
@@ -186,7 +297,7 @@ export default function GotoOverlay({ onJumpToSeq, onClose, sessionId, totalLine
               ))}
             </div>
           ) : input.trim() && isHexAddress(input.trim()) ? (
-            <div style={{ padding: "8px 12px", color: "var(--text-secondary)" }}>无匹配结果</div>
+            <div style={{ padding: "8px 12px", color: "var(--text-secondary)" }}>No matches found</div>
           ) : null}
         </div>
       </div>

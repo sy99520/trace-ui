@@ -14,6 +14,7 @@ import TabPanel from "./components/TabPanel";
 import FileTabBar from "./components/FileTabBar";
 import GotoOverlay from "./components/GotoOverlay";
 import TaintConfigDialog from "./components/TaintConfigDialog";
+import ToastContainer, { useToast } from "./components/Toast";
 import { useTraceStore } from "./hooks/useTraceStore";
 import { useSliceState } from "./hooks/useSliceState";
 import { useRecentFiles } from "./hooks/useRecentFiles";
@@ -53,6 +54,7 @@ const PANEL_WINDOW_TITLES: Record<string, string> = {
 };
 
 function App() {
+  const { toasts, showToast } = useToast();
   const { preferences, updatePreferences } = usePreferences();
 
   const {
@@ -522,12 +524,13 @@ function App() {
     try {
       await invoke("scan_strings", { sessionId: activeSessionId });
       setHasStringIndexMap(prev => new Map(prev).set(activeSessionId, true));
+      showToast("Scan Strings 完成");
     } catch (e) {
       console.warn("scan_strings:", e);
     } finally {
       setStringsScanningSessionId(null);
     }
-  }, [activeSessionId, setHasStringIndexMap]);
+  }, [activeSessionId, setHasStringIndexMap, showToast]);
 
   const cancelScanStrings = useCallback(async () => {
     if (!stringsScanningSessionId) return;
@@ -1132,6 +1135,7 @@ function App() {
           </div>
         </div>
       )}
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

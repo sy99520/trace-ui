@@ -1,3 +1,10 @@
+export interface CallInfoDto {
+  func_name: string;
+  is_jni: boolean;
+  summary: string;
+  tooltip: string;
+}
+
 export interface TraceLine {
   seq: number;
   address: string;
@@ -8,6 +15,7 @@ export interface TraceLine {
   mem_addr: string | null;
   mem_size: number | null;
   raw: string;
+  call_info: CallInfoDto | null;
 }
 
 export interface MemorySnapshot {
@@ -58,6 +66,7 @@ export interface DefUseChain {
 export interface CallTreeNodeDto {
   id: number;
   func_addr: string;
+  func_name: string | null;
   entry_seq: number;
   exit_seq: number;
   parent_id: number | null;

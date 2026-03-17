@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { TraceLine, CallTreeNodeDto, DefUseChain } from "../types/trace";
 import type { HighlightInfo } from "../hooks/useHighlights";
 import { useResizableColumn } from "../hooks/useResizableColumn";
@@ -400,6 +402,7 @@ export default function TraceTable({
   const dragInTextArea = useRef(false); // mouseDown 是否在文本区域（disasm/changes 列）
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const ctxRegRef = useRef<string | undefined>(undefined);
+  const ctxCallInfoRef = useRef<{ tooltip: string; isJni: boolean } | null>(null);
   const [highlightSubmenuOpen, setHighlightSubmenuOpen] = useState(false);
 
   // === 切片状态缓存（Canvas 同步渲染用） ===
@@ -408,6 +411,8 @@ export default function TraceTable({
   // === 注释相关状态 ===
   const [commentTooltip, setCommentTooltip] = useState<{ seq: number; x: number; y: number; text: string } | null>(null);
   const [callInfoTooltip, setCallInfoTooltip] = useState<{ x: number; y: number; text: string; isJni: boolean } | null>(null);
+  const callInfoHoveredRef = useRef(false);
+  const callInfoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [commentEditor, setCommentEditor] = useState<{ seq: number; x: number; y: number; text: string } | null>(null);
   const commentEditorRef = useRef<HTMLDivElement>(null);
   const textSelectionRef = useRef<string>(""); // 右键菜单打开时保存的文本选区
@@ -911,6 +916,25 @@ export default function TraceTable({
     }
   }, [finalVirtualTotalRows, canvasSize.width, effectiveChangesWidth]);
 
+  // === call_info 独立窗口 ===
+  const openCallInfoWindow = useCallback(async (text: string, isJni: boolean, mouseX: number, mouseY: number) => {
+    const winLabel = `panel-call-info-${Date.now()}`;
+    const unlisten = await listen(`call-info:ready:${winLabel}`, () => {
+      emitTo(winLabel, "call-info:init-data", { text, isJni });
+      unlisten();
+    });
+    new WebviewWindow(winLabel, {
+      url: `index.html?panel=call-info`,
+      title: isJni ? "JNI Call Info" : "Call Info",
+      width: 520,
+      height: 360,
+      x: Math.round(mouseX),
+      y: Math.round(mouseY),
+      decorations: false,
+      transparent: true,
+    });
+  }, []);
+
   // === Canvas 点击 ===
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     const container = containerRef.current;
@@ -981,6 +1005,9 @@ export default function TraceTable({
       if (x < colChanges) {
         for (const hb of hitboxesRef.current) {
           if (hb.rowIndex === rowIdx && x >= hb.x && x <= hb.x + hb.width) {
+            if (hb.token.startsWith("__call_info__")) {
+              return; // call_info 改为双击打开
+            }
             isInternalClick.current = true;
             onSelectSeq(resolved.seq);
             handleRegClick(resolved.seq, hb.token);
@@ -1026,7 +1053,7 @@ export default function TraceTable({
     shiftAnchorVi.current = vi;
   }, [finalVirtualTotalRows, finalResolveVirtualIndex, finalSeqToVirtualIndex, animatedToggleFold, blLineMap,
       isFolded, sessionId, canvasSize, effectiveChangesWidth, handleRegClick,
-      handleArrowJump, onSelectSeq, onUnhideGroup, selectedSeq]);
+      handleArrowJump, onSelectSeq, onUnhideGroup, selectedSeq, openCallInfoWindow, visibleLines]);
 
   const handleOverlayMouseUp = useCallback((e: React.MouseEvent) => {
     const wasDragging = isDraggingSelect.current;
@@ -1045,8 +1072,26 @@ export default function TraceTable({
       window.getSelection()?.removeAllRanges();
       return;
     }
-    // 双击让浏览器处理选词
-    if (e.detail >= 2) return;
+    // 双击：检测 call_info hitbox，命中则打开窗口，否则让浏览器处理选词
+    if (e.detail >= 2) {
+      const container2 = containerRef.current;
+      if (container2) {
+        const rect2 = container2.getBoundingClientRect();
+        const cx = e.clientX - rect2.left;
+        const scrollFrac2 = (scrollPosRef.current % 1) * ROW_HEIGHT;
+        const rowIdx2 = Math.floor((e.clientY - rect2.top + scrollFrac2) / ROW_HEIGHT);
+        for (const hb of hitboxesRef.current) {
+          if (hb.rowIndex === rowIdx2 && cx >= hb.x && cx <= hb.x + hb.width && hb.token.startsWith("__call_info__")) {
+            const hoveredLine = visibleLines.get(hb.seq) ?? prefetchCacheRef.current.get(hb.seq);
+            if (hoveredLine?.call_info) {
+              openCallInfoWindow(hoveredLine.call_info.tooltip, hoveredLine.call_info.is_jni, e.clientX, e.clientY);
+            }
+            return;
+          }
+        }
+      }
+      return;
+    }
     const dx = e.clientX - mouseDownPosRef.current.x;
     const dy = e.clientY - mouseDownPosRef.current.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1057,7 +1102,7 @@ export default function TraceTable({
       dirtyRef.current = true;
       handleCanvasClick(e);
     }
-  }, [handleCanvasClick, multiSelect]);
+  }, [handleCanvasClick, multiSelect, visibleLines, openCallInfoWindow]);
 
   // === 关闭注释编辑框并恢复焦点 ===
   const closeCommentEditor = useCallback(() => {
@@ -1124,13 +1169,12 @@ export default function TraceTable({
           const hbSeq = hb.seq;
           const hoveredLine = visibleLines.get(hbSeq) ?? prefetchCacheRef.current.get(hbSeq);
           if (hoveredLine?.call_info) {
-            const ctr = containerRef.current;
-            if (ctr) {
-              const ctrRect = ctr.getBoundingClientRect();
-              const scrollFrac2 = (scrollPosRef.current % 1) * ROW_HEIGHT;
+            if (callInfoClearTimerRef.current) { clearTimeout(callInfoClearTimerRef.current); callInfoClearTimerRef.current = null; }
+            // 仅首次显示时设定位置，避免鼠标移动导致 tooltip 跟随
+            if (!callInfoTooltip) {
               setCallInfoTooltip({
-                x: ctrRect.left + hb.x,
-                y: ctrRect.top + hb.rowIndex * ROW_HEIGHT + ROW_HEIGHT - scrollFrac2,
+                x: e.clientX,
+                y: e.clientY + 12,
                 text: hoveredLine.call_info.tooltip,
                 isJni: hoveredLine.call_info.is_jni,
               });
@@ -1140,12 +1184,22 @@ export default function TraceTable({
           return;
         }
         if (textOverlayRef.current) textOverlayRef.current.style.cursor = "pointer";
-        if (callInfoTooltip) setCallInfoTooltip(null);
+        if (callInfoTooltip && !callInfoHoveredRef.current) {
+          if (callInfoClearTimerRef.current) clearTimeout(callInfoClearTimerRef.current);
+          callInfoClearTimerRef.current = setTimeout(() => {
+            if (!callInfoHoveredRef.current) setCallInfoTooltip(null);
+          }, 150);
+        }
         return;
       }
     }
-    // 不在 call_info hitbox 上时清除 tooltip
-    if (callInfoTooltip) setCallInfoTooltip(null);
+    // 不在 call_info hitbox 上时清除 tooltip（延迟，允许鼠标移入弹窗）
+    if (callInfoTooltip && !callInfoHoveredRef.current) {
+      if (callInfoClearTimerRef.current) clearTimeout(callInfoClearTimerRef.current);
+      callInfoClearTimerRef.current = setTimeout(() => {
+        if (!callInfoHoveredRef.current) setCallInfoTooltip(null);
+      }, 150);
+    }
 
     // 检测折叠按钮区域或摘要行
     if (x >= COL_FOLD && x < COL_MEMRW) {
@@ -1334,14 +1388,26 @@ export default function TraceTable({
     e.preventDefault();
     // 清除上次右键的文本选区（防止残留值导致菜单始终显示 Copy）
     textSelectionRef.current = "";
-    // 检测右键位置是否命中某个寄存器 hitbox
+    // 检测右键位置是否命中某个寄存器 hitbox 或 call_info
     const container = containerRef.current;
     ctxRegRef.current = undefined;
+    ctxCallInfoRef.current = null;
     if (container) {
       const rect = container.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const scrollFrac2 = (scrollPosRef.current % 1) * ROW_HEIGHT;
       const rowIdx = Math.floor((e.clientY - rect.top + scrollFrac2) / ROW_HEIGHT);
+      // 检测当前行是否有 call_info
+      const vi2 = Math.floor(scrollPosRef.current) + rowIdx;
+      if (vi2 < finalVirtualTotalRows) {
+        const resolved2 = finalResolveVirtualIndex(vi2);
+        if (resolved2.type === "line") {
+          const line2 = visibleLines.get(resolved2.seq) ?? prefetchCacheRef.current.get(resolved2.seq);
+          if (line2?.call_info) {
+            ctxCallInfoRef.current = { tooltip: line2.call_info.tooltip, isJni: line2.call_info.is_jni };
+          }
+        }
+      }
       for (const hb of hitboxesRef.current) {
         if (hb.rowIndex === rowIdx && cx >= hb.x && cx <= hb.x + hb.width) {
           ctxRegRef.current = hb.token;
@@ -1375,7 +1441,7 @@ export default function TraceTable({
         }
       }
     }
-  }, [multiSelect, ctrlSelect, selectedSeq, finalVirtualTotalRows, finalResolveVirtualIndex]);
+  }, [multiSelect, ctrlSelect, selectedSeq, finalVirtualTotalRows, finalResolveVirtualIndex, visibleLines]);
 
   // 点击外部自动保存并关闭注释编辑框
   useEffect(() => {
@@ -2481,6 +2547,23 @@ export default function TraceTable({
                     style={{ padding: "6px 12px", fontSize: 12, color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap" }}
                   >Delete Comment</div>
                 )}
+                {/* Call Info（仅当前行有 call_info 时显示） */}
+                {ctxCallInfoRef.current && (
+                  <>
+                    <ContextMenuSeparator />
+                    <div
+                      onClick={() => {
+                        if (ctxCallInfoRef.current) {
+                          openCallInfoWindow(ctxCallInfoRef.current.tooltip, ctxCallInfoRef.current.isJni, ctxMenu!.x, ctxMenu!.y);
+                        }
+                        setCtxMenu(null);
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-selected)"; setHighlightSubmenuOpen(false); }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                      style={{ padding: "6px 12px", fontSize: 12, color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap" }}
+                    >Call Info</div>
+                  </>
+                )}
                 {/* Taint Trace */}
                 {onTaintRequest && (
                   <>
@@ -2538,7 +2621,7 @@ export default function TraceTable({
               left: callInfoTooltip.x,
               top: callInfoTooltip.y,
               background: "var(--bg-dialog, #2b2d30)",
-              border: `1px solid ${callInfoTooltip.isJni ? "#c792ea" : "#56d4dd"}`,
+              border: "1px solid var(--border-color, #3e4150)",
               borderRadius: 4,
               boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
               padding: "8px 12px",
@@ -2549,7 +2632,14 @@ export default function TraceTable({
               fontFamily: '"JetBrains Mono", "Fira Code", monospace',
               color: "var(--text-primary, #abb2bf)",
               whiteSpace: "pre",
-              pointerEvents: "none",
+            }}
+            onMouseEnter={() => {
+              callInfoHoveredRef.current = true;
+              if (callInfoClearTimerRef.current) { clearTimeout(callInfoClearTimerRef.current); callInfoClearTimerRef.current = null; }
+            }}
+            onMouseLeave={() => {
+              callInfoHoveredRef.current = false;
+              setCallInfoTooltip(null);
             }}
           >
             {callInfoTooltip.text}

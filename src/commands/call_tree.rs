@@ -7,6 +7,7 @@ use crate::taint::call_tree::CallTreeNode;
 pub struct CallTreeNodeDto {
     pub id: u32,
     pub func_addr: String,
+    pub func_name: Option<String>,
     pub entry_seq: u32,
     pub exit_seq: u32,
     pub parent_id: Option<u32>,
@@ -18,6 +19,7 @@ fn node_to_dto(n: &CallTreeNode) -> CallTreeNodeDto {
     CallTreeNodeDto {
         id: n.id,
         func_addr: format!("0x{:x}", n.func_addr),
+        func_name: n.func_name.clone(),
         entry_seq: n.entry_seq,
         exit_seq: n.exit_seq,
         parent_id: n.parent_id,

@@ -7,6 +7,7 @@ import ContextMenu, { ContextMenuItem, ContextMenuSeparator } from "./ContextMen
 interface FlatRow {
   id: number;
   func_addr: string;
+  func_name: string | null;
   entry_seq: number;
   line_count: number;
   depth: number;
@@ -64,7 +65,8 @@ export default function FunctionTree({
       const isExp = expanded.has(id);
       const isChildrenLoaded = !lazyMode || (loadedNodes?.has(id) ?? false);
       result.push({
-        id: dto.id, func_addr: dto.func_addr, entry_seq: dto.entry_seq,
+        id: dto.id, func_addr: dto.func_addr, func_name: dto.func_name ?? null,
+        entry_seq: dto.entry_seq,
         line_count: dto.exit_seq - dto.entry_seq + 1,
         depth, hasChildren, isExpanded: isExp, isChildrenLoaded,
       });
@@ -161,6 +163,7 @@ export default function FunctionTree({
             if (!row) return null;
             const isNodeLoading = loadingNodes.has(row.id);
             const customName = funcRename.getName(row.func_addr);
+            const displayName = customName || row.func_name;
             return (
               <div
                 key={row.id}
@@ -184,7 +187,7 @@ export default function FunctionTree({
                     ? (isNodeLoading ? "\u23F3" : (row.isExpanded && row.isChildrenLoaded ? "\u25BC" : "\u25B6"))
                     : ""}
                 </span>
-                {customName
+                {displayName
                   ? <span
                       style={{ color: "var(--text-primary)", flexShrink: 0 }}
                       onMouseEnter={(e) => {
@@ -197,7 +200,7 @@ export default function FunctionTree({
                         if (tooltipTimer.current) { clearTimeout(tooltipTimer.current); tooltipTimer.current = null; }
                         setTooltip(null);
                       }}
-                    >{customName}</span>
+                    >{displayName}</span>
                   : <span style={{ color: "var(--text-address)", flexShrink: 0 }}>{row.func_addr}</span>
                 }
                 <span style={{ color: "var(--text-secondary)", fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>
