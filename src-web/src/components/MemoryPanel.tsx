@@ -26,7 +26,6 @@ interface Props {
   onJumpToSeq: (seq: number) => void;
   sessionId: string | null;
   resetKey?: number;
-  memIndexProgress?: number | null; // null = ready, 0-100 = building
 }
 
 const BYTES_PER_LINE = 16;
@@ -44,7 +43,7 @@ function toAsciiChar(byte: number): string {
   return byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ".";
 }
 
-export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Ready, memAddr: memAddrProp, memRw: memRwProp, memSize: memSizeProp, onJumpToSeq, sessionId, resetKey, memIndexProgress }: Props) {
+export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Ready, memAddr: memAddrProp, memRw: memRwProp, memSize: memSizeProp, onJumpToSeq, sessionId, resetKey }: Props) {
   const selectedSeqFromStore = useSelectedSeq();
   const selectedSeq = selectedSeqProp !== undefined ? selectedSeqProp : selectedSeqFromStore;
 
@@ -396,19 +395,6 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}></span>
-      </div>
-    );
-  }
-
-  if (memIndexProgress != null) {
-    return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-        <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-          正在构建内存索引... {memIndexProgress}%
-        </span>
-        <div style={{ width: 200, height: 4, background: "var(--border-color)", borderRadius: 2 }}>
-          <div style={{ width: `${memIndexProgress}%`, height: "100%", background: "var(--accent-color, #4a9eff)", borderRadius: 2, transition: "width 0.3s ease" }} />
-        </div>
       </div>
     );
   }

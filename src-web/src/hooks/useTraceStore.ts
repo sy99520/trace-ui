@@ -35,8 +35,6 @@ export function useTraceStore(skipStrings: boolean = false) {
   const [indexError, setIndexError] = useState<{ message: string; filePath: string } | null>(null);
   const indexErrorRef = useRef<typeof indexError>(null);
   const [hasStringIndexMap, setHasStringIndexMap] = useState<Map<string, boolean>>(new Map());
-  const [memIndexProgressMap, setMemIndexProgressMap] = useState<Map<string, number | null>>(new Map());
-  const [stringIndexProgressMap, setStringIndexProgressMap] = useState<Map<string, number | null>>(new Map());
   const skipStringsRef = useRef(skipStrings);
   skipStringsRef.current = skipStrings;
 
@@ -157,39 +155,6 @@ export function useTraceStore(skipStrings: boolean = false) {
       unlisten.then((fn) => fn());
     };
   }, [updateSession]);
-
-  // 内存索引后台构建进度
-  useEffect(() => {
-    const unlistenProgress = listen<{ sessionId: string; progress: number }>(
-      "mem-index-progress",
-      (event) => {
-        const { sessionId: sid, progress } = event.payload;
-        setMemIndexProgressMap(prev => new Map(prev).set(sid, Math.round(progress * 100)));
-      }
-    );
-    const unlistenReady = listen<{ sessionId: string }>(
-      "mem-index-ready",
-      (event) => {
-        setMemIndexProgressMap(prev => new Map(prev).set(event.payload.sessionId, null));
-      }
-    );
-    const unlistenStrProgress = listen<{ sessionId: string; progress: number; done?: boolean }>(
-      "string-index-progress",
-      (event) => {
-        const { sessionId: sid, progress, done } = event.payload;
-        if (done) {
-          setStringIndexProgressMap(prev => new Map(prev).set(sid, null));
-        } else {
-          setStringIndexProgressMap(prev => new Map(prev).set(sid, Math.round(progress * 100)));
-        }
-      }
-    );
-    return () => {
-      unlistenProgress.then((fn) => fn());
-      unlistenReady.then((fn) => fn());
-      unlistenStrProgress.then((fn) => fn());
-    };
-  }, []);
 
   const getSelectedSeqForSession = useCallback((sid: string): number | null => {
     return selectedSeqMapRef.current.get(sid) ?? null;
@@ -407,7 +372,5 @@ export function useTraceStore(skipStrings: boolean = false) {
     clearIndexError: () => setIndexError(null),
     hasStringIndexMap,
     setHasStringIndexMap,
-    memIndexProgress: activeSessionId ? (memIndexProgressMap.get(activeSessionId) ?? null) : null,
-    stringIndexProgress: activeSessionId ? (stringIndexProgressMap.get(activeSessionId) ?? null) : null,
   };
 }
