@@ -40,15 +40,24 @@ pub async fn create_session(
         let mut sessions = state.sessions.write().map_err(|e| format!("锁获取失败: {}", e))?;
         sessions.insert(session_id.clone(), SessionState {
             mmap: Arc::new(mmap),
-            line_index: None,
             file_path: path,
             total_lines: total_lines_estimate,
             file_size,
+            trace_format: TraceFormat::Unidbg,
+            // New rkyv fields
+            call_tree: None,
+            phase2_store: None,
+            string_index: None,
+            scan_store: None,
+            reg_last_def: None,
+            lidx_store: None,
+            // Legacy fields (transition)
             phase2: None,
             scan_state: None,
+            line_index: None,
+            // Unchanged
             slice_result: None,
             scan_strings_cancelled: Arc::new(AtomicBool::new(false)),
-            trace_format: TraceFormat::Unidbg,
             call_annotations: std::collections::HashMap::new(),
             consumed_seqs: Vec::new(),
             call_search_texts: std::collections::HashMap::new(),
