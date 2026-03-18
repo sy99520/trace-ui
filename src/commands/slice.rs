@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::state::AppState;
-use crate::taint::types::parse_reg;
+use crate::taint::types::{parse_reg, TraceFormat};
 use crate::taint::def_use::determine_def_use;
 use crate::taint::insn_class;
 use crate::taint::parser;
+use crate::taint::gumtrace_parser;
 use crate::taint::slicer;
 
 const MAX_RESOLVE_SCAN: u32 = 50000;
@@ -23,6 +24,7 @@ fn resolve_start_index(
     scan_state: &crate::taint::scanner::ScanState,
     mmap: &[u8],
     line_index: &crate::line_index::LineIndex,
+    format: TraceFormat,
 ) -> Result<u32, String> {
     if let Some(rest) = spec.strip_prefix("reg:") {
         let (name, suffix) = rest.rsplit_once('@')
@@ -39,7 +41,7 @@ fn resolve_start_index(
                 .map_err(|_| format!("无效行号: {}", suffix))?
                 .checked_sub(1)
                 .ok_or("行号必须 >= 1".to_string())?;
-            resolve_reg_def(reg, line, mmap, line_index)
+            resolve_reg_def(reg, line, mmap, line_index, format)
         }
     } else if let Some(rest) = spec.strip_prefix("mem:") {
         let (addr_str, suffix) = rest.rsplit_once('@')
@@ -59,7 +61,7 @@ fn resolve_start_index(
                 .map_err(|_| format!("无效行号: {}", suffix))?
                 .checked_sub(1)
                 .ok_or("行号必须 >= 1".to_string())?;
-            resolve_mem_store(addr, line, mmap, line_index)
+            resolve_mem_store(addr, line, mmap, line_index, format)
         }
     } else {
         Err(format!("不支持的 spec 格式: {} (需要 reg:NAME@... 或 mem:ADDR@...)", spec))
@@ -71,12 +73,17 @@ fn resolve_reg_def(
     from_line: u32,
     mmap: &[u8],
     line_index: &crate::line_index::LineIndex,
+    format: TraceFormat,
 ) -> Result<u32, String> {
     let scan_start = from_line.saturating_sub(MAX_RESOLVE_SCAN);
     for s in (scan_start..=from_line).rev() {
         if let Some(raw) = line_index.get_line(mmap, s) {
             if let Ok(line_str) = std::str::from_utf8(raw) {
-                if let Some(parsed) = parser::parse_line(line_str) {
+                let parsed = match format {
+                    TraceFormat::Unidbg => parser::parse_line(line_str),
+                    TraceFormat::Gumtrace => gumtrace_parser::parse_line_gumtrace(line_str),
+                };
+                if let Some(parsed) = parsed {
                     let cls = insn_class::classify_and_refine(&parsed);
                     let (defs, _) = determine_def_use(cls, &parsed);
                     if defs.iter().any(|r| *r == target_reg) {
@@ -94,12 +101,17 @@ fn resolve_mem_store(
     from_line: u32,
     mmap: &[u8],
     line_index: &crate::line_index::LineIndex,
+    format: TraceFormat,
 ) -> Result<u32, String> {
     let scan_start = from_line.saturating_sub(MAX_RESOLVE_SCAN);
     for s in (scan_start..=from_line).rev() {
         if let Some(raw) = line_index.get_line(mmap, s) {
             if let Ok(line_str) = std::str::from_utf8(raw) {
-                if let Some(parsed) = parser::parse_line(line_str) {
+                let parsed = match format {
+                    TraceFormat::Unidbg => parser::parse_line(line_str),
+                    TraceFormat::Gumtrace => gumtrace_parser::parse_line_gumtrace(line_str),
+                };
+                if let Some(parsed) = parsed {
                     if let Some(ref mem) = parsed.mem_op {
                         if mem.is_write {
                             let width = mem.elem_width as u64;
@@ -133,9 +145,10 @@ pub fn run_slice(
         let scan_state = session.scan_state.as_ref()
             .ok_or("索引尚未构建完成，请等待构建完成后再执行切片")?;
 
+        let format = session.trace_format;
         let mut start_indices = Vec::new();
         for spec in &from_specs {
-            let idx = resolve_start_index(spec, scan_state, &session.mmap, session.line_index.as_ref().ok_or_else(|| "索引尚未构建完成".to_string())?)?;
+            let idx = resolve_start_index(spec, scan_state, &session.mmap, session.line_index.as_ref().ok_or_else(|| "索引尚未构建完成".to_string())?, format)?;
             start_indices.push(idx);
         }
 
