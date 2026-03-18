@@ -65,6 +65,7 @@ pub struct UnresolvedRegUse {
 // === CallTree event log ===
 
 /// Events recorded during chunk scanning for later replay into CallTreeBuilder.
+#[derive(Clone)]
 pub enum CallTreeEvent {
     Call { seq: u32, target: u64 },
     Ret { seq: u32 },
@@ -77,6 +78,7 @@ pub enum CallTreeEvent {
 // === Gumtrace annotation event log ===
 
 /// Events recorded during chunk scanning for later replay of Gumtrace annotations.
+#[derive(Clone)]
 pub enum GumtraceAnnotEvent {
     BranchInstr { seq: u32 },
     SpecialLine { seq: u32, special: SpecialLineData },
@@ -84,6 +86,7 @@ pub enum GumtraceAnnotEvent {
 }
 
 /// Parsed content of a Gumtrace special line.
+#[derive(Clone)]
 pub enum SpecialLineData {
     CallFunc {
         name: String,

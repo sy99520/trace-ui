@@ -455,6 +455,273 @@ pub fn merge_string_indices(indices: Vec<StringIndex>) -> StringIndex {
     StringIndex { strings: all_strings }
 }
 
+use crate::taint::ScanResult;
+use crate::taint::scanner::{ScanState, MemLastDef};
+use crate::state::Phase2State;
+use crate::taint::types::TraceFormat;
+use crate::taint::parallel_types::ChunkResult;
+
+/// Phase 2 orchestrator: merge all chunk results into a single ScanResult.
+///
+/// Performs sequential forward propagation to resolve cross-chunk dependencies,
+/// then merges all data structures into unified output.
+pub fn merge_all_chunks(
+    chunk_results: Vec<ChunkResult>,
+    format: TraceFormat,
+    data_only: bool,
+) -> ScanResult {
+    let num_chunks = chunk_results.len();
+    let mut all_patch_edges: Vec<(u32, u32)> = Vec::new();
+    let mut all_pair_fixups: Vec<(u32, PairSplitDeps)> = Vec::new();
+    let mut init_corrections: Vec<(u32, bool)> = Vec::new();
+    let mut all_call_events: Vec<CallTreeEvent> = Vec::new();
+    let mut all_gumtrace_events: Vec<GumtraceAnnotEvent> = Vec::new();
+
+    // Sequential forward propagation of global state
+    let mut global_mem_last_def: FxHashMap<u64, (u32, u64)> = FxHashMap::default();
+    let mut global_reg_last_def = RegLastDef::new();
+    let mut global_last_cond_branch: Option<u32> = None;
+
+    // Collect partial pair fixup info during first pass (borrow only)
+    struct PartialPairFixupInfo {
+        partial_pair_loads: Vec<PartialUnresolvedPairLoad>,
+        chunk_idx: usize,
+        // Snapshot of global state at the time of this chunk
+        mem_snapshot: FxHashMap<u64, (u32, u64)>,
+        reg_snapshot: RegLastDef,
+    }
+    let mut partial_pair_fixups: Vec<PartialPairFixupInfo> = Vec::new();
+
+    // Pass 1: Forward propagation + fixup (borrow chunk_results)
+    for (i, chunk) in chunk_results.iter().enumerate() {
+        if i > 0 {
+            // === Resolve fully unresolved loads ===
+            for load in &chunk.unresolved_loads {
+                resolve_unresolved_load(
+                    load,
+                    &global_mem_last_def,
+                    &global_reg_last_def,
+                    &mut all_patch_edges,
+                    &mut init_corrections,
+                );
+            }
+
+            // === Resolve partially unresolved loads (mixed case) ===
+            resolve_partial_unresolved_loads(
+                &chunk.partial_unresolved_loads,
+                &global_mem_last_def,
+                &mut all_patch_edges,
+                &mut init_corrections,
+            );
+
+            // === Resolve fully unresolved pair loads ===
+            for pair in &chunk.unresolved_pair_loads {
+                let (split, edges) = resolve_unresolved_pair_load(
+                    pair,
+                    &global_mem_last_def,
+                    &global_reg_last_def,
+                    global_last_cond_branch,
+                    data_only,
+                );
+                all_pair_fixups.push((pair.line, split));
+                all_patch_edges.extend(edges);
+            }
+
+            // === Collect partial pair loads for later fixup (need mutable pair_split) ===
+            if !chunk.partial_unresolved_pair_loads.is_empty() {
+                partial_pair_fixups.push(PartialPairFixupInfo {
+                    partial_pair_loads: chunk.partial_unresolved_pair_loads.iter().map(|p| {
+                        PartialUnresolvedPairLoad {
+                            line: p.line,
+                            addr: p.addr,
+                            elem_width: p.elem_width,
+                            half1_unresolved: p.half1_unresolved,
+                            half2_unresolved: p.half2_unresolved,
+                            base_reg: p.base_reg,
+                            base_reg_unresolved: p.base_reg_unresolved,
+                        }
+                    }).collect(),
+                    chunk_idx: i,
+                    mem_snapshot: global_mem_last_def.clone(),
+                    reg_snapshot: global_reg_last_def.clone(),
+                });
+            }
+
+            // === Resolve unresolved register uses ===
+            let reg_patches = resolve_unresolved_reg_uses(
+                &chunk.unresolved_reg_uses,
+                &global_reg_last_def,
+            );
+            all_patch_edges.extend(reg_patches);
+
+            // === Resolve control deps ===
+            let ctrl_patches = resolve_control_deps(
+                chunk.start_line,
+                chunk.first_local_cond_branch,
+                global_last_cond_branch,
+                chunk.end_line,
+                &chunk.needs_control_dep,
+                data_only,
+            );
+            all_patch_edges.extend(ctrl_patches);
+        }
+
+        // Accumulate events
+        all_call_events.extend(chunk.call_tree_events.iter().cloned());
+        all_gumtrace_events.extend(chunk.gumtrace_annot_events.iter().cloned());
+
+        // Update global state from this chunk's boundary
+        for (&addr, &val) in &chunk.boundary.final_mem_last_def {
+            global_mem_last_def.insert(addr, val);
+        }
+        // Per-register merge: only overwrite registers actually defined in this chunk
+        let chunk_reg = chunk.boundary.final_reg_last_def.inner();
+        let global_reg = global_reg_last_def.inner_mut();
+        for idx in 0..RegId::COUNT {
+            if chunk_reg[idx] != u32::MAX {
+                global_reg[idx] = chunk_reg[idx];
+            }
+        }
+        if chunk.boundary.final_last_cond_branch.is_some() {
+            global_last_cond_branch = chunk.boundary.final_last_cond_branch;
+        }
+    }
+
+    // === Pass 2: Decompose chunk_results (move out data) ===
+    let mut chunk_deps = Vec::with_capacity(num_chunks);
+    let mut chunk_inits = Vec::with_capacity(num_chunks);
+    let mut chunk_pair_splits = Vec::with_capacity(num_chunks);
+    let mut chunk_mem_indices = Vec::with_capacity(num_chunks);
+    let mut chunk_reg_ckpts = Vec::with_capacity(num_chunks);
+    let mut chunk_string_indices = Vec::with_capacity(num_chunks);
+    let mut chunk_line_indices = Vec::with_capacity(num_chunks);
+    let mut all_consumed_seqs = Vec::new();
+    let mut chunk_start_lines = Vec::with_capacity(num_chunks);
+    let mut total_parsed_count = 0u32;
+    let mut total_mem_op_count = 0u32;
+
+    let mut prev_final_reg_values = [u64::MAX; RegId::COUNT];
+
+    for (i, chunk) in chunk_results.into_iter().enumerate() {
+        chunk_start_lines.push(chunk.start_line);
+        chunk_deps.push(chunk.deps);
+        chunk_inits.push(chunk.init_mem_loads);
+        chunk_pair_splits.push(chunk.pair_split);
+        chunk_mem_indices.push(chunk.mem_access_index);
+        chunk_string_indices.push(chunk.string_index);
+        chunk_line_indices.push(chunk.line_index);
+        all_consumed_seqs.extend(chunk.consumed_seqs);
+        total_parsed_count += chunk.boundary.final_parsed_count;
+        total_mem_op_count += chunk.boundary.final_mem_op_count;
+
+        // Fix reg checkpoints using previous chunk's final values
+        let mut ckpts = chunk.reg_checkpoints;
+        if i > 0 {
+            fix_reg_checkpoints(&mut ckpts, &prev_final_reg_values);
+        }
+        chunk_reg_ckpts.push(ckpts);
+        prev_final_reg_values = chunk.boundary.final_reg_values;
+    }
+
+    // === Handle partial pair load fixups (need mutable access to pair_splits) ===
+    for fixup_info in &partial_pair_fixups {
+        let pair_split = &mut chunk_pair_splits[fixup_info.chunk_idx];
+        for partial in &fixup_info.partial_pair_loads {
+            resolve_partial_pair_load(
+                partial,
+                &fixup_info.mem_snapshot,
+                &fixup_info.reg_snapshot,
+                pair_split,
+                &mut all_patch_edges,
+            );
+        }
+    }
+
+    // === Rebuild unified data structures ===
+
+    // CompactDeps
+    let merged_deps = rebuild_compact_deps(&chunk_deps, &chunk_start_lines, &all_patch_edges);
+
+    // Total lines
+    let total_lines = chunk_start_lines.last().copied().unwrap_or(0)
+        + chunk_deps.last().map(|d| d.offsets.len() as u32).unwrap_or(0);
+
+    // CallTree
+    let call_tree = replay_call_tree_events(&all_call_events, total_lines);
+
+    // Gumtrace annotations
+    let (call_annotations, extra_consumed) = if format == TraceFormat::Gumtrace {
+        replay_gumtrace_annotations(&all_gumtrace_events)
+    } else {
+        (HashMap::new(), Vec::new())
+    };
+
+    // consumed_seqs
+    all_consumed_seqs.extend(extra_consumed);
+    all_consumed_seqs.sort_unstable();
+
+    // MemAccessIndex
+    let mem_accesses = merge_mem_access_indices(chunk_mem_indices);
+
+    // RegCheckpoints: merge all snapshots
+    let merged_ckpts = {
+        let mut all_snapshots = Vec::new();
+        for ckpt in chunk_reg_ckpts {
+            all_snapshots.extend(ckpt.snapshots);
+        }
+        RegCheckpoints {
+            interval: 1000,
+            snapshots: all_snapshots,
+        }
+    };
+
+    // StringIndex
+    let string_index = merge_string_indices(chunk_string_indices);
+
+    // LineIndex
+    let line_index = merge_line_indices(chunk_line_indices);
+
+    // init_mem_loads
+    let init_mem_loads = merge_init_mem_loads(chunk_inits, &init_corrections);
+
+    // pair_split
+    let pair_split = merge_pair_splits(chunk_pair_splits, all_pair_fixups);
+
+    // Build ScanState
+    let mut mem_last_def_map = MemLastDef::Map(global_mem_last_def);
+    mem_last_def_map.compact();
+
+    let scan_state = ScanState {
+        reg_last_def: global_reg_last_def,
+        mem_last_def: mem_last_def_map,
+        last_cond_branch: global_last_cond_branch,
+        deps: merged_deps,
+        line_count: total_lines,
+        parsed_count: total_parsed_count,
+        mem_op_count: total_mem_op_count,
+        resolved_targets: FxHashMap::default(),
+        unknown_mnemonics: FxHashMap::default(),
+        init_mem_loads,
+        pair_split,
+    };
+
+    let phase2 = Phase2State {
+        call_tree,
+        mem_accesses,
+        reg_checkpoints: merged_ckpts,
+        string_index,
+    };
+
+    ScanResult {
+        scan_state,
+        phase2,
+        line_index,
+        format,
+        call_annotations,
+        consumed_seqs: all_consumed_seqs,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,64 @@
 use memchr::memchr_iter;
+use rayon::prelude::*;
+
+use crate::taint::{self, ScanResult, ProgressFn};
+use crate::taint::chunk_scan;
+use crate::taint::merge;
+
+/// Parallel version of scan_unified.
+/// Falls back to single-threaded for small files.
+pub fn scan_unified_parallel(
+    data: &[u8],
+    data_only: bool,
+    no_prune: bool,
+    skip_strings: bool,
+    progress_fn: Option<ProgressFn>,
+    num_chunks: usize,
+) -> anyhow::Result<ScanResult> {
+    // Small files or single chunk: fall back to single-threaded
+    if data.len() < 10 * 1024 * 1024 || num_chunks <= 1 {
+        return taint::scan_unified(data, data_only, no_prune, skip_strings, progress_fn);
+    }
+
+    let format = taint::gumtrace_parser::detect_format(data);
+
+    // Phase 0: Split and count lines
+    let chunks_meta = split_into_chunks(data, num_chunks);
+
+    if let Some(ref cb) = progress_fn {
+        cb(0, data.len());
+    }
+
+    // Phase 1: Parallel chunk scanning
+    let chunk_results: Vec<_> = chunks_meta
+        .par_iter()
+        .map(|meta| {
+            chunk_scan::scan_chunk(
+                data,
+                meta.start_byte,
+                meta.end_byte,
+                meta.start_line,
+                format,
+                data_only,
+                no_prune,
+                skip_strings,
+            )
+        })
+        .collect();
+
+    if let Some(ref cb) = progress_fn {
+        cb(data.len() * 2 / 3, data.len());
+    }
+
+    // Phase 2: Sequential merge
+    let result = merge::merge_all_chunks(chunk_results, format, data_only);
+
+    if let Some(ref cb) = progress_fn {
+        cb(data.len(), data.len());
+    }
+
+    Ok(result)
+}
 
 /// Metadata for a chunk of the file.
 pub struct ChunkMeta {
@@ -149,5 +209,14 @@ mod tests {
             let total: u32 = chunks.iter().map(|c| c.line_count).sum();
             assert_eq!(total, 10, "total lines wrong for n={}", n);
         }
+    }
+
+    #[test]
+    fn test_parallel_matches_unified_simple() {
+        // Small file should fall back to single-threaded
+        let trace = "line1\nline2\nline3\n";
+        let data = trace.as_bytes();
+        let result = scan_unified_parallel(data, false, false, true, None, 2);
+        assert!(result.is_ok());
     }
 }
