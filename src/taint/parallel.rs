@@ -25,6 +25,16 @@ pub fn scan_unified_parallel(
     // Phase 0: Split and count lines
     let chunks_meta = split_into_chunks(data, num_chunks);
 
+    // LINE_MASK safety check: 29-bit line number limit (bits 29-31 reserved for flags)
+    let total_lines: u32 = chunks_meta.iter().map(|c| c.line_count).sum();
+    if total_lines > crate::taint::scanner::LINE_MASK {
+        anyhow::bail!(
+            "文件行数 {} 超过当前支持的最大值 {}（约 5.36 亿行）。",
+            total_lines,
+            crate::taint::scanner::LINE_MASK,
+        );
+    }
+
     if let Some(ref cb) = progress_fn {
         cb(0, data.len());
     }
