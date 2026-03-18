@@ -8,3 +8,4 @@ pub mod line_index;
 pub mod archives;
 pub mod convert;
 pub mod scan_view;
+pub mod cache_format;

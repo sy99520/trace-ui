@@ -1,4 +1,3 @@
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatMemLastDef {
     pub addrs: Vec<u64>,  // sorted
     pub lines: Vec<u32>,
@@ -15,26 +14,6 @@ impl FlatMemLastDef {
     }
 }
 
-impl ArchivedFlatMemLastDef {
-    pub fn view(&self) -> MemLastDefView<'_> {
-        // SAFETY: On little-endian platforms, u64_le == u64 and u32_le == u32 in bit layout.
-        let addrs: &[u64] = unsafe {
-            core::slice::from_raw_parts(self.addrs.as_ptr() as *const u64, self.addrs.len())
-        };
-        let lines: &[u32] = unsafe {
-            core::slice::from_raw_parts(self.lines.as_ptr() as *const u32, self.lines.len())
-        };
-        let values: &[u64] = unsafe {
-            core::slice::from_raw_parts(self.values.as_ptr() as *const u64, self.values.len())
-        };
-        MemLastDefView {
-            addrs,
-            lines,
-            values,
-        }
-    }
-}
-
 pub struct MemLastDefView<'a> {
     addrs: &'a [u64],
     lines: &'a [u32],
@@ -42,6 +21,10 @@ pub struct MemLastDefView<'a> {
 }
 
 impl<'a> MemLastDefView<'a> {
+    pub fn from_raw(addrs: &'a [u64], lines: &'a [u32], values: &'a [u64]) -> Self {
+        Self { addrs, lines, values }
+    }
+
     /// Binary search by address; returns (line, value) if found.
     pub fn get(&self, addr: &u64) -> Option<(u32, u64)> {
         let idx = self.addrs.binary_search(addr).ok()?;

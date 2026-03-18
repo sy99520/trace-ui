@@ -2,7 +2,6 @@ use memchr::memchr;
 
 const BLOCK_SIZE: u32 = 256;
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct LineIndexArchive {
     pub sampled_offsets: Vec<u64>,
     pub total: u32,
@@ -17,29 +16,16 @@ impl LineIndexArchive {
     }
 }
 
-impl ArchivedLineIndexArchive {
-    pub fn view(&self) -> LineIndexView<'_> {
-        let total: u32 = self.total.into();
-        // SAFETY: On little-endian platforms, u64_le and u64 have identical bit layout.
-        let sampled_offsets: &[u64] = unsafe {
-            core::slice::from_raw_parts(
-                self.sampled_offsets.as_ptr() as *const u64,
-                self.sampled_offsets.len(),
-            )
-        };
-        LineIndexView {
-            sampled_offsets,
-            total,
-        }
-    }
-}
-
 pub struct LineIndexView<'a> {
     sampled_offsets: &'a [u64],
     total: u32,
 }
 
 impl<'a> LineIndexView<'a> {
+    pub fn from_raw(sampled_offsets: &'a [u64], total: u32) -> Self {
+        Self { sampled_offsets, total }
+    }
+
     /// Return the total number of lines.
     pub fn total_lines(&self) -> u32 {
         self.total

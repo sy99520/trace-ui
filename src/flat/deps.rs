@@ -1,4 +1,3 @@
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatDeps {
     pub chunk_start_lines: Vec<u32>,
     pub chunk_offsets_start: Vec<u32>, // where chunk i's offsets begin in all_offsets
@@ -8,13 +7,6 @@ pub struct FlatDeps {
     pub patch_lines: Vec<u32>,   // sorted line numbers with patches
     pub patch_offsets: Vec<u32>, // CSR into patch_data
     pub patch_data: Vec<u32>,
-}
-
-/// Helper: reinterpret an ArchivedVec<u32> (rkyv::rend::u32_le) as &[u32].
-///
-/// SAFETY: On little-endian platforms, u32_le and u32 have identical bit layout.
-unsafe fn archived_u32_slice(v: &rkyv::vec::ArchivedVec<rkyv::rend::u32_le>) -> &[u32] {
-    core::slice::from_raw_parts(v.as_ptr() as *const u32, v.len())
 }
 
 impl FlatDeps {
@@ -32,24 +24,6 @@ impl FlatDeps {
     }
 }
 
-impl ArchivedFlatDeps {
-    pub fn view(&self) -> DepsView<'_> {
-        // SAFETY: little-endian only; u32_le == u32 in bit layout.
-        unsafe {
-            DepsView {
-                chunk_start_lines: archived_u32_slice(&self.chunk_start_lines),
-                chunk_offsets_start: archived_u32_slice(&self.chunk_offsets_start),
-                chunk_data_start: archived_u32_slice(&self.chunk_data_start),
-                all_offsets: archived_u32_slice(&self.all_offsets),
-                all_data: archived_u32_slice(&self.all_data),
-                patch_lines: archived_u32_slice(&self.patch_lines),
-                patch_offsets: archived_u32_slice(&self.patch_offsets),
-                patch_data: archived_u32_slice(&self.patch_data),
-            }
-        }
-    }
-}
-
 pub struct DepsView<'a> {
     chunk_start_lines: &'a [u32],
     chunk_offsets_start: &'a [u32],
@@ -62,6 +36,28 @@ pub struct DepsView<'a> {
 }
 
 impl<'a> DepsView<'a> {
+    pub fn from_raw(
+        chunk_start_lines: &'a [u32],
+        chunk_offsets_start: &'a [u32],
+        chunk_data_start: &'a [u32],
+        all_offsets: &'a [u32],
+        all_data: &'a [u32],
+        patch_lines: &'a [u32],
+        patch_offsets: &'a [u32],
+        patch_data: &'a [u32],
+    ) -> Self {
+        Self {
+            chunk_start_lines,
+            chunk_offsets_start,
+            chunk_data_start,
+            all_offsets,
+            all_data,
+            patch_lines,
+            patch_offsets,
+            patch_data,
+        }
+    }
+
     /// Return dependency data for a given global line number.
     pub fn row(&self, global_line: usize) -> &'a [u32] {
         let line = global_line as u32;

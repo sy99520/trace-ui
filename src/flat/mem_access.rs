@@ -16,45 +16,6 @@ pub struct FlatMemAccessRecord {
     pub _pad: [u8; 2], // explicit pad to reach 24 bytes total
 }
 
-// SAFETY: FlatMemAccessRecord is repr(C) with explicit padding (_pad).
-// All bytes are initialised — no implicit padding, no uninit bytes.
-// Treated as portable for same-endian (little-endian) use only.
-unsafe impl rkyv::Portable for FlatMemAccessRecord {}
-unsafe impl rkyv::traits::NoUndef for FlatMemAccessRecord {}
-
-impl rkyv::Archive for FlatMemAccessRecord {
-    type Archived = Self;
-    type Resolver = ();
-
-    fn resolve(&self, _resolver: Self::Resolver, out: rkyv::Place<Self::Archived>) {
-        // SAFETY: Self is repr(C) with no padding; we copy bytes directly.
-        unsafe {
-            out.write_unchecked(*self);
-        }
-    }
-}
-
-impl<S: rkyv::ser::Allocator + rkyv::ser::Writer + rkyv::rancor::Fallible + ?Sized>
-    rkyv::Serialize<S> for FlatMemAccessRecord
-{
-    fn serialize(
-        &self,
-        _serializer: &mut S,
-    ) -> Result<Self::Resolver, <S as rkyv::rancor::Fallible>::Error> {
-        Ok(())
-    }
-}
-
-impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::Deserialize<FlatMemAccessRecord, D>
-    for FlatMemAccessRecord
-{
-    fn deserialize(
-        &self,
-        _deserializer: &mut D,
-    ) -> Result<FlatMemAccessRecord, <D as rkyv::rancor::Fallible>::Error> {
-        Ok(*self)
-    }
-}
 
 impl FlatMemAccessRecord {
     #[inline]
@@ -68,7 +29,6 @@ impl FlatMemAccessRecord {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatMemAccess {
     pub addrs: Vec<u64>,   // sorted unique addresses
     pub offsets: Vec<u32>, // CSR: records for addrs[i] = records[offsets[i]..offsets[i+1]]
@@ -85,33 +45,6 @@ impl FlatMemAccess {
     }
 }
 
-impl ArchivedFlatMemAccess {
-    pub fn view(&self) -> MemAccessView<'_> {
-        // SAFETY: On little-endian platforms (the only target for this crate),
-        // u64_le and u64 have identical bit layout. Reinterpreting the slices
-        // is safe because both types are the same size and alignment.
-        let addrs: &[u64] = unsafe {
-            core::slice::from_raw_parts(
-                self.addrs.as_ptr() as *const u64,
-                self.addrs.len(),
-            )
-        };
-        let offsets: &[u32] = unsafe {
-            core::slice::from_raw_parts(
-                self.offsets.as_ptr() as *const u32,
-                self.offsets.len(),
-            )
-        };
-        MemAccessView {
-            addrs,
-            offsets,
-            // ArchivedVec<FlatMemAccessRecord>.as_slice() → &[FlatMemAccessRecord]
-            // because FlatMemAccessRecord uses #[rkyv(as = Self)].
-            records: self.records.as_slice(),
-        }
-    }
-}
-
 pub struct MemAccessView<'a> {
     addrs: &'a [u64],
     offsets: &'a [u32],
@@ -119,6 +52,10 @@ pub struct MemAccessView<'a> {
 }
 
 impl<'a> MemAccessView<'a> {
+    pub fn from_raw(addrs: &'a [u64], offsets: &'a [u32], records: &'a [FlatMemAccessRecord]) -> Self {
+        Self { addrs, offsets, records }
+    }
+
     /// Binary search addrs, return records slice for the given address.
     pub fn query(&self, addr: u64) -> Option<&'a [FlatMemAccessRecord]> {
         let idx = self.addrs.binary_search(&addr).ok()?;
@@ -136,10 +73,12 @@ impl<'a> MemAccessView<'a> {
         })
     }
 
+    #[allow(dead_code)]
     pub fn total_records(&self) -> usize {
         self.records.len()
     }
 
+    #[allow(dead_code)]
     pub fn total_addresses(&self) -> usize {
         self.addrs.len()
     }

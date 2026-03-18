@@ -94,12 +94,12 @@ async fn build_index_inner(
         let detected_format = taint::gumtrace_parser::detect_format(data);
         eprintln!("[index] detected_format={:?}, force={}, file_path={}", detected_format, force, file_path);
 
-        // 尝试从 rkyv 缓存加载（三个核心缓存全部命中时使用）
+        // 尝试从缓存加载（三个核心缓存全部命中时使用）
         if !force {
             if let (Some(p2_mmap), Some(scan_mmap), Some(lidx_mmap)) = (
-                cache::load_phase2_rkyv(&file_path, data),
-                cache::load_scan_rkyv(&file_path, data),
-                cache::load_lidx_rkyv(&file_path, data),
+                cache::load_phase2_cache(&file_path, data),
+                cache::load_scan_cache(&file_path, data),
+                cache::load_lidx_cache(&file_path, data),
             ) {
                 let string_index = cache::load_string_cache(&file_path, data);
 
@@ -121,7 +121,7 @@ async fn build_index_inner(
                 let lidx_store = CachedStore::Mapped(lidx_mmap);
                 let total_lines = lidx_store.total_lines();
 
-                eprintln!("[index] rkyv cache hit: total_lines={}, format={:?}", total_lines, detected_format);
+                eprintln!("[index] section cache hit: total_lines={}, format={:?}", total_lines, detected_format);
                 return Ok(IndexResult::CacheHit {
                     phase2_store,
                     call_tree,
@@ -205,7 +205,7 @@ async fn build_index_inner(
                 session.consumed_seqs = consumed_seqs;
                 session.rebuild_call_search_texts();
 
-                // New rkyv fields
+                // Populate session from cache
                 session.call_tree = Some(call_tree);
                 session.string_index = string_index;
                 session.reg_last_def = Some(reg_last_def);
@@ -213,7 +213,7 @@ async fn build_index_inner(
                 session.scan_store = Some(scan_store);
                 session.lidx_store = Some(lidx_store);
 
-                eprintln!("[index] session populated from rkyv cache");
+                eprintln!("[index] session populated from section cache");
             }
             None // no need to save cache again
         }
@@ -270,7 +270,7 @@ async fn build_index_inner(
         }
     };
 
-    // 后台保存 rkyv 缓存（不阻塞用户交互）
+    // 后台保存缓存（不阻塞用户交互）
     if let Some(fp) = file_path_for_cache {
         let app_cache = app.clone();
         let sid_cache = session_id.to_string();
@@ -281,20 +281,20 @@ async fn build_index_inner(
                 if let Some(session) = sessions.get(&*sid_cache) {
                     let data: &[u8] = &session.mmap;
 
-                    // Save rkyv caches
+                    // Save section-based caches
                     if let Some(ref store) = session.phase2_store {
                         if let CachedStore::Owned(ref archive) = store {
-                            cache::save_phase2_rkyv(&fp, data, archive);
+                            cache::save_phase2_cache(&fp, data, archive);
                         }
                     }
                     if let Some(ref store) = session.scan_store {
                         if let CachedStore::Owned(ref archive) = store {
-                            cache::save_scan_rkyv(&fp, data, archive);
+                            cache::save_scan_cache(&fp, data, archive);
                         }
                     }
                     if let Some(ref store) = session.lidx_store {
                         if let CachedStore::Owned(ref archive) = store {
-                            cache::save_lidx_rkyv(&fp, data, archive);
+                            cache::save_lidx_cache(&fp, data, archive);
                         }
                     }
                     if let Some(ref si) = session.string_index {
@@ -308,7 +308,7 @@ async fn build_index_inner(
                         cache::save_gumtrace_extra(&fp, data, &session.call_annotations, &session.consumed_seqs);
                     }
 
-                    eprintln!("[index] background rkyv cache save complete");
+                    eprintln!("[index] background background cache save complete");
                 }
             }).await;
         });

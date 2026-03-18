@@ -23,7 +23,6 @@ regex = "1"
 uuid = { version = "1.22.0", features = ["v4"] }
 tauri-plugin-opener = "2.5.3"
 rayon = "1"
-rkyv = { version = "0.8", features = ["alloc"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

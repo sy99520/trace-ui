@@ -44,7 +44,7 @@ pub async fn create_session(
             total_lines: total_lines_estimate,
             file_size,
             trace_format: TraceFormat::Unidbg,
-            // rkyv fields
+            // cache fields
             call_tree: None,
             phase2_store: None,
             string_index: None,

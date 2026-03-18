@@ -26,16 +26,16 @@ pub struct SessionState {
     pub file_size: u64,
     pub trace_format: TraceFormat,
 
-    // Phase2 (rkyv split)
+    // Phase2
     pub call_tree: Option<CallTree>,
     pub phase2_store: Option<CachedStore<Phase2Archive>>,
     pub string_index: Option<StringIndex>,
 
-    // Scan (rkyv)
+    // Scan
     pub scan_store: Option<CachedStore<ScanArchive>>,
     pub reg_last_def: Option<RegLastDef>,
 
-    // LineIndex (rkyv)
+    // LineIndex
     pub lidx_store: Option<CachedStore<LineIndexArchive>>,
 
     // Unchanged

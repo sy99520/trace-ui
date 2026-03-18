@@ -1,4 +1,3 @@
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatBitVec {
     pub data: Vec<u8>,
     pub len: u32,
@@ -13,23 +12,16 @@ impl FlatBitVec {
     }
 }
 
-impl ArchivedFlatBitVec {
-    pub fn view(&self) -> BitView<'_> {
-        let len: u32 = self.len.into();
-        // ArchivedVec<u8>: u8 archived as u8 (no endian conversion needed).
-        BitView {
-            data: self.data.as_slice(),
-            len: len as usize,
-        }
-    }
-}
-
 pub struct BitView<'a> {
     data: &'a [u8],
     len: usize,
 }
 
 impl<'a> BitView<'a> {
+    pub fn from_raw(data: &'a [u8], len: u32) -> Self {
+        Self { data, len: len as usize }
+    }
+
     /// Return the bit at position `idx` (little-endian bit order within each byte).
     #[inline]
     pub fn get(&self, idx: usize) -> bool {
@@ -49,6 +41,7 @@ impl<'a> BitView<'a> {
 
     /// Return true if there are no bits.
     #[inline]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }

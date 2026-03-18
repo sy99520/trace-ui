@@ -105,25 +105,13 @@ fn save_cached<T: serde::Serialize>(file_path: &str, data: &[u8], suffix: &str, 
     let _ = writer.flush();
 }
 
-// ── rkyv 通用加载/保存 ──
+// ── Section-based cache save/load ──
 
-fn save_rkyv_cached<T>(file_path: &str, data: &[u8], suffix: &str, value: &T)
-where
-    T: for<'a> rkyv::Serialize<rkyv::api::high::HighSerializer<rkyv::util::AlignedVec, rkyv::ser::allocator::ArenaHandle<'a>, rkyv::rancor::Error>>,
-{
+fn save_sections_cached(file_path: &str, data: &[u8], suffix: &str, section_bytes: &[u8]) {
     let Some(path) = cache_path_ext(file_path, suffix) else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-
-    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(value) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("[cache] rkyv serialization failed for {}: {:?}", suffix, e);
-            return;
-        }
-    };
-
     let file = match std::fs::File::create(&path) {
         Ok(f) => f,
         Err(_) => return,
@@ -137,19 +125,13 @@ where
     header.extend_from_slice(&head_hash(data));
     header.resize(HEADER_LEN_V4, 0); // pad to 64 bytes
 
-    if writer.write_all(&header).is_err() {
-        eprintln!("[cache] failed to write header for {}", suffix);
-        return;
-    }
-    if writer.write_all(&bytes).is_err() {
-        eprintln!("[cache] failed to write rkyv data for {} ({} bytes)", suffix, bytes.len());
-        return;
-    }
+    if writer.write_all(&header).is_err() { return; }
+    if writer.write_all(section_bytes).is_err() { return; }
     let _ = writer.flush();
-    eprintln!("[cache] saved {} ({} + {} bytes)", suffix, HEADER_LEN_V4, bytes.len());
+    eprintln!("[cache] saved {} ({} + {} bytes)", suffix, HEADER_LEN_V4, section_bytes.len());
 }
 
-fn load_rkyv_mmap(file_path: &str, data: &[u8], suffix: &str) -> Option<Arc<Mmap>> {
+fn load_cache_mmap(file_path: &str, data: &[u8], suffix: &str) -> Option<Arc<Mmap>> {
     let path = cache_path_ext(file_path, suffix)?;
     let file = match std::fs::File::open(&path) {
         Ok(f) => f,
@@ -184,34 +166,37 @@ fn load_rkyv_mmap(file_path: &str, data: &[u8], suffix: &str) -> Option<Arc<Mmap
     Some(Arc::new(mmap))
 }
 
-// ── Phase2 rkyv 缓存 ──
+// ── Phase2 cache ──
 
-pub fn save_phase2_rkyv(file_path: &str, data: &[u8], archive: &Phase2Archive) {
-    save_rkyv_cached(file_path, data, ".p2.rkyv", archive);
+pub fn save_phase2_cache(file_path: &str, data: &[u8], archive: &Phase2Archive) {
+    let section_bytes = archive.to_sections();
+    save_sections_cached(file_path, data, ".p2.cache", &section_bytes);
 }
 
-pub fn load_phase2_rkyv(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
-    load_rkyv_mmap(file_path, data, ".p2.rkyv")
+pub fn load_phase2_cache(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
+    load_cache_mmap(file_path, data, ".p2.cache")
 }
 
-// ── Scan rkyv 缓存 ──
+// ── Scan cache ──
 
-pub fn save_scan_rkyv(file_path: &str, data: &[u8], archive: &ScanArchive) {
-    save_rkyv_cached(file_path, data, ".scan.rkyv", archive);
+pub fn save_scan_cache(file_path: &str, data: &[u8], archive: &ScanArchive) {
+    let section_bytes = archive.to_sections();
+    save_sections_cached(file_path, data, ".scan.cache", &section_bytes);
 }
 
-pub fn load_scan_rkyv(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
-    load_rkyv_mmap(file_path, data, ".scan.rkyv")
+pub fn load_scan_cache(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
+    load_cache_mmap(file_path, data, ".scan.cache")
 }
 
-// ── LineIndex rkyv 缓存 ──
+// ── LineIndex cache ──
 
-pub fn save_lidx_rkyv(file_path: &str, data: &[u8], archive: &LineIndexArchive) {
-    save_rkyv_cached(file_path, data, ".lidx.rkyv", archive);
+pub fn save_lidx_cache(file_path: &str, data: &[u8], archive: &LineIndexArchive) {
+    let section_bytes = archive.to_sections();
+    save_sections_cached(file_path, data, ".lidx.cache", &section_bytes);
 }
 
-pub fn load_lidx_rkyv(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
-    load_rkyv_mmap(file_path, data, ".lidx.rkyv")
+pub fn load_lidx_cache(file_path: &str, data: &[u8]) -> Option<Arc<Mmap>> {
+    load_cache_mmap(file_path, data, ".lidx.cache")
 }
 
 // ── StringIndex bincode 缓存 ──
@@ -244,10 +229,16 @@ pub fn load_gumtrace_extra(
     load_cached(file_path, data, ".gum-extra")
 }
 
-/// 删除指定文件的所有缓存（新 rkyv + 旧 bincode）
+/// 删除指定文件的所有缓存
 pub fn delete_cache(file_path: &str) {
-    // New rkyv suffixes
-    for suffix in [".p2.rkyv", ".scan.rkyv", ".lidx.rkyv", ".strings.bin", ".gum-extra.bin"] {
+    // New section-based cache suffixes
+    for suffix in [".p2.cache", ".scan.cache", ".lidx.cache", ".strings.bin", ".gum-extra.bin"] {
+        if let Some(p) = cache_path_ext(file_path, suffix) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+    // Old rkyv suffixes (cleanup)
+    for suffix in [".p2.rkyv", ".scan.rkyv", ".lidx.rkyv"] {
         if let Some(p) = cache_path_ext(file_path, suffix) {
             let _ = std::fs::remove_file(p);
         }
@@ -275,7 +266,7 @@ pub fn clear_all_cache() -> (u32, u64) {
         for entry in entries.flatten() {
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str());
-            if ext == Some("bin") || ext == Some("rkyv") {
+            if ext == Some("bin") || ext == Some("rkyv") || ext == Some("cache") {
                 if let Ok(meta) = path.metadata() {
                     total_size += meta.len();
                 }

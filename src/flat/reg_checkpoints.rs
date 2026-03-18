@@ -1,6 +1,5 @@
 pub const REG_COUNT: usize = 98; // = RegId::COUNT
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatRegCheckpoints {
     pub interval: u32,
     pub count: u32,
@@ -17,22 +16,6 @@ impl FlatRegCheckpoints {
     }
 }
 
-impl ArchivedFlatRegCheckpoints {
-    pub fn view(&self) -> RegCheckpointsView<'_> {
-        let interval: u32 = self.interval.into();
-        let count: u32 = self.count.into();
-        // SAFETY: On little-endian platforms, u64_le and u64 have identical bit layout.
-        let data: &[u64] = unsafe {
-            core::slice::from_raw_parts(self.data.as_ptr() as *const u64, self.data.len())
-        };
-        RegCheckpointsView {
-            interval,
-            count,
-            data,
-        }
-    }
-}
-
 pub struct RegCheckpointsView<'a> {
     pub interval: u32,
     count: u32,
@@ -40,6 +23,10 @@ pub struct RegCheckpointsView<'a> {
 }
 
 impl<'a> RegCheckpointsView<'a> {
+    pub fn from_raw(interval: u32, count: u32, data: &'a [u64]) -> Self {
+        Self { interval, count, data }
+    }
+
     /// Returns (snapshot_seq, &[u64; REG_COUNT]) for the checkpoint at or before `seq`.
     pub fn nearest_before(&self, seq: u32) -> Option<(u32, &'a [u64; REG_COUNT])> {
         if self.count == 0 {

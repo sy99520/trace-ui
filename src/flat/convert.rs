@@ -216,7 +216,7 @@ pub fn bitvec_to_flat(bv: &bitvec::prelude::BitVec) -> FlatBitVec {
     }
 }
 
-/// Convert a `LineIndex` to `LineIndexArchive` (for rkyv caching).
+/// Convert a `LineIndex` to `LineIndexArchive` (for cache serialization).
 pub fn line_index_to_archive(li: &LineIndex) -> LineIndexArchive {
     LineIndexArchive {
         sampled_offsets: li.sampled_offsets().to_vec(),

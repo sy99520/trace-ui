@@ -1,15 +1,7 @@
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct FlatPairSplit {
     pub keys: Vec<u32>,        // sorted line numbers
     pub seg_offsets: Vec<u32>, // len = keys.len() * 3 + 1 (sentinel)
     pub data: Vec<u32>,
-}
-
-/// Helper: reinterpret an ArchivedVec<u32_le> as &[u32].
-///
-/// SAFETY: On little-endian platforms, u32_le and u32 have identical bit layout.
-unsafe fn archived_u32_slice(v: &rkyv::vec::ArchivedVec<rkyv::rend::u32_le>) -> &[u32] {
-    core::slice::from_raw_parts(v.as_ptr() as *const u32, v.len())
 }
 
 impl FlatPairSplit {
@@ -18,19 +10,6 @@ impl FlatPairSplit {
             keys: &self.keys,
             seg_offsets: &self.seg_offsets,
             data: &self.data,
-        }
-    }
-}
-
-impl ArchivedFlatPairSplit {
-    pub fn view(&self) -> PairSplitView<'_> {
-        // SAFETY: little-endian only; u32_le == u32 in bit layout.
-        unsafe {
-            PairSplitView {
-                keys: archived_u32_slice(&self.keys),
-                seg_offsets: archived_u32_slice(&self.seg_offsets),
-                data: archived_u32_slice(&self.data),
-            }
         }
     }
 }
@@ -48,6 +27,10 @@ pub struct PairSplitEntry<'a> {
 }
 
 impl<'a> PairSplitView<'a> {
+    pub fn from_raw(keys: &'a [u32], seg_offsets: &'a [u32], data: &'a [u32]) -> Self {
+        Self { keys, seg_offsets, data }
+    }
+
     /// Binary search keys, return entry with 3 slices if found.
     pub fn get(&self, key: &u32) -> Option<PairSplitEntry<'a>> {
         let idx = self.keys.binary_search(key).ok()?;
