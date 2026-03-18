@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Preferences } from "../hooks/usePreferences";
+import { THEMES } from "../theme/themes";
+import type { ThemeId } from "../theme/themes";
+import { themeStore } from "../stores/themeStore";
 
 interface Props {
   preferences: Preferences;
@@ -32,12 +35,19 @@ export default function PreferencesDialog({ preferences, onSave, onClose, onClea
   const [tab, setTab] = useState<Tab>("General");
   const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [originalTheme] = useState<ThemeId>(preferences.theme);
+
+  const handleClose = useCallback(() => {
+    // 取消时恢复原主题
+    themeStore.set(originalTheme);
+    onClose();
+  }, [originalTheme, onClose]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") handleClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [handleClose]);
 
   const refreshCacheInfo = useCallback(() => {
     invoke<CacheInfo>("get_cache_dir").then(setCacheInfo).catch(console.error);
@@ -81,7 +91,7 @@ export default function PreferencesDialog({ preferences, onSave, onClose, onClea
         display: "flex", alignItems: "center", justifyContent: "center",
         zIndex: 10000,
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div
         style={{
@@ -108,7 +118,7 @@ export default function PreferencesDialog({ preferences, onSave, onClose, onClea
             Preferences
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               background: "transparent", border: "none",
               color: "var(--text-secondary)", fontSize: 16,
@@ -162,22 +172,61 @@ export default function PreferencesDialog({ preferences, onSave, onClose, onClea
 
             {/* ── General Tab ── */}
             {tab === "General" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
-                  Startup
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                {/* Theme */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+                    Theme
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {THEMES.map(t => {
+                      const active = local.theme === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            setLocal(prev => ({ ...prev, theme: t.id }));
+                            themeStore.set(t.id); // 即时预览
+                          }}
+                          onMouseEnter={(e) => { if (!active) e.currentTarget.style.borderColor = "var(--text-secondary)"; }}
+                          onMouseLeave={(e) => { if (!active) e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          style={{
+                            padding: "6px 16px",
+                            fontSize: 12,
+                            color: active ? "#fff" : "var(--text-primary)",
+                            background: active ? "var(--btn-primary)" : "var(--bg-input)",
+                            border: `1px solid ${active ? "var(--btn-primary)" : "var(--border-color)"}`,
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            fontWeight: active ? 600 : 400,
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  fontSize: 12, color: "var(--text-primary)", cursor: "pointer",
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={local.reopenLastFile}
-                    onChange={(e) => setLocal(prev => ({ ...prev, reopenLastFile: e.target.checked }))}
-                    style={{ accentColor: "var(--btn-primary)" }}
-                  />
-                  Restore previous session on startup
-                </label>
+
+                {/* Startup */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+                    Startup
+                  </div>
+                  <label style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    fontSize: 12, color: "var(--text-primary)", cursor: "pointer",
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={local.reopenLastFile}
+                      onChange={(e) => setLocal(prev => ({ ...prev, reopenLastFile: e.target.checked }))}
+                      style={{ accentColor: "var(--btn-primary)" }}
+                    />
+                    Restore previous session on startup
+                  </label>
+                </div>
               </div>
             )}
 
@@ -289,7 +338,7 @@ export default function PreferencesDialog({ preferences, onSave, onClose, onClea
           flexShrink: 0,
         }}>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-input)"; }}
             style={{

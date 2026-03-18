@@ -3,6 +3,10 @@ import App from "./App";
 import FloatingPanel from "./FloatingPanel";
 import FloatingSession from "./FloatingSession";
 import "./theme/global.css";
+import { themeStore } from "./stores/themeStore";
+
+// 启动时立即应用保存的主题，避免闪烁
+themeStore.init();
 
 // 全局禁用原生右键菜单，所有右键功能由自定义组件接管
 document.addEventListener("contextmenu", (e) => e.preventDefault());

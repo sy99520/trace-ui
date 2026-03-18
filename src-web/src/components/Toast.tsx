@@ -46,8 +46,8 @@ export default function ToastContainer({ toasts }: { toasts: ToastItem[] }) {
     }}>
       {toasts.map(t => (
         <div key={t.id} style={{
-          background: "#323232",
-          color: "#fff",
+          background: "var(--bg-dialog)",
+          color: "var(--text-primary)",
           padding: "10px 20px",
           borderRadius: 6,
           fontSize: 13,

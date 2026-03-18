@@ -38,6 +38,9 @@
   --asm-immediate: #d19a66;
   --asm-shift: #98c379;
 
+  /* ── 交互状态 ── */
+  --bg-hover: rgba(255,255,255,0.04);
+
   /* ── 边框 ── */
   --border-color: #3e4150;
 
@@ -83,8 +86,8 @@ html, body {
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #3e4150; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #525769; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, #3e4150); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover, #525769); }
 
 @keyframes spin {
   0% { transform: rotate(0deg); }

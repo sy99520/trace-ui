@@ -91,7 +91,7 @@ export default function StringXRefsPanel() {
                 background: isSelected ? "var(--bg-selected)"
                   : i % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)",
               }}
-              onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+              onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
               onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = isSelected ? "var(--bg-selected)" : i % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)"; }}
             >
               <span style={{ width: 70, flexShrink: 0, color: "var(--syntax-number)" }}>{xref.seq + 1}</span>

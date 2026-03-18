@@ -79,7 +79,7 @@ export default function CustomScrollbar({
           width: 8,
           height: thumbHeight,
           borderRadius: 4,
-          background: isDragging || isHovered ? "#525769" : "#3e4150",
+          background: isDragging || isHovered ? "var(--scrollbar-thumb-hover)" : "var(--scrollbar-thumb)",
           cursor: "pointer",
           transition: isDragging ? "none" : "background 0.15s",
         }}

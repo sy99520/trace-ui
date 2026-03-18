@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import type { ThemeId } from "../theme/themes";
 
 const PREFS_KEY = "trace-ui-preferences";
 const SESSION_SNAPSHOT_KEY = "trace-ui-session-snapshot";
@@ -9,6 +10,7 @@ export interface Preferences {
   showHiddenIndicators: boolean;
   cacheDir: string; // empty string = use default path
   scanStringsOnBuild: boolean;
+  theme: ThemeId;
 }
 
 export interface TaintConfig {
@@ -37,6 +39,7 @@ const DEFAULTS: Preferences = {
   showHiddenIndicators: true,
   cacheDir: "",
   scanStringsOnBuild: true,
+  theme: "dark",
 };
 
 function load(): Preferences {

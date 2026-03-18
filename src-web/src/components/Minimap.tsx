@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import type { TraceLine } from "../types/trace";
 import type { ResolvedRow } from "../hooks/useFoldState";
-import { SHARED_COLORS, MINIMAP_COLORS } from "../utils/canvasColors";
+import { getSharedColors, getMinimapColors } from "../utils/canvasColors";
+import { useThemeId } from "../stores/themeStore";
 
 const MINIMAP_WIDTH = 70;
 const MINIMAP_ROW_HEIGHT = 2;
@@ -11,19 +12,24 @@ const MINIMAP_COL_START = 4;
 // 色块不透明度：token 压暗到远景感，仅暗示代码结构
 const MM_TOKEN_ALPHA = 0.35;
 
-// 合并共用颜色和 Minimap 特有颜色，保持组件内 MM_COLORS.xxx 用法不变
-const MM_COLORS = {
-  bg: SHARED_COLORS.bgPrimary,
-  border: SHARED_COLORS.borderColor,
-  mnemonic: SHARED_COLORS.asmMnemonic,
-  register: SHARED_COLORS.asmRegister,
-  address: SHARED_COLORS.textAddress,
-  immediate: SHARED_COLORS.asmImmediate,
-  memory: SHARED_COLORS.asmMemory,
-  changes: SHARED_COLORS.textChanges,
-  text: SHARED_COLORS.textSecondary,
-  ...MINIMAP_COLORS,
-};
+// 合并共用颜色和 Minimap 特有颜色——每次调用动态获取当前主题
+function getMM_COLORS() {
+  const s = getSharedColors();
+  const m = getMinimapColors();
+  return {
+    bg: s.bgPrimary,
+    border: s.borderColor,
+    mnemonic: s.asmMnemonic,
+    register: s.asmRegister,
+    address: s.textAddress,
+    immediate: s.asmImmediate,
+    memory: s.asmMemory,
+    changes: s.textChanges,
+    text: s.textSecondary,
+    ...m,
+  };
+}
+let MM_COLORS = getMM_COLORS();
 
 import { REG_RE, SHIFT_RE, IMM_RE, BRACKET_RE, TOKEN_RE } from "../utils/arm64Tokens";
 
@@ -55,6 +61,7 @@ export default function Minimap({
   virtualTotalRows, visibleRows, currentRow, maxRow, height,
   onScroll, resolveVirtualIndex, getLines, selectedSeq, rightOffset,
 }: MinimapProps) {
+  const _themeId = useThemeId(); // 触发主题切换时的重绘
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -115,6 +122,7 @@ export default function Minimap({
 
   // 绘制
   const drawMinimap = useCallback(() => {
+    MM_COLORS = getMM_COLORS(); // 刷新当前主题颜色
     const canvas = canvasRef.current;
     if (!canvas || height === 0) return;
     const ctx = canvas.getContext("2d");
@@ -199,15 +207,15 @@ export default function Minimap({
     const vpColor = isDragging ? MM_COLORS.viewportDrag : isHovered ? MM_COLORS.viewportHover : MM_COLORS.viewportBg;
     ctx.fillStyle = vpColor;
     ctx.fillRect(0, viewportTop, MINIMAP_WIDTH, viewportHeight);
-    ctx.strokeStyle = "rgba(255,255,255,0.2)";
+    ctx.strokeStyle = MM_COLORS.viewportBorder;
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, viewportTop + 0.5, MINIMAP_WIDTH - 1, viewportHeight - 1);
     ctx.restore();
   }, [height, virtualTotalRows, totalMinimapRows, resolveVirtualIndex,
-      selectedSeq, viewportTop, viewportHeight, isDragging, isHovered]);
+      selectedSeq, viewportTop, viewportHeight, isDragging, isHovered, _themeId]);
 
   useEffect(() => { dirtyRef.current = true; }, [
-    currentRow, selectedSeq, height, virtualTotalRows, isDragging, isHovered,
+    currentRow, selectedSeq, height, virtualTotalRows, isDragging, isHovered, _themeId,
   ]);
 
   useEffect(() => {

@@ -9,16 +9,19 @@ import { useResizableColumn } from "../hooks/useResizableColumn";
 import type { useFoldState, ResolvedRow } from "../hooks/useFoldState";
 import CustomScrollbar from "./CustomScrollbar";
 import Minimap, { MINIMAP_WIDTH } from "./Minimap";
-import { SHARED_COLORS, TRACE_TABLE_COLORS } from "../utils/canvasColors";
+import { getSharedColors, getTraceTableColors } from "../utils/canvasColors";
 import { HIGHLIGHT_COLORS } from "../utils/highlightColors";
 import ContextMenu, { ContextMenuItem, ContextMenuSeparator } from "./ContextMenu";
 import { useSelectedSeq } from "../stores/selectedSeqStore";
+import { useThemeId } from "../stores/themeStore";
 
 const ROW_HEIGHT = 22;
 const ARROW_COL_WIDTH = 20;
 
-// 合并共用颜色和 TraceTable 特有颜色，保持组件内 COLORS.xxx 用法不变
-const COLORS = { ...SHARED_COLORS, ...TRACE_TABLE_COLORS };
+// 合并共用颜色和 TraceTable 特有颜色——每次访问动态获取当前主题颜色
+function getCOLORS() { return { ...getSharedColors(), ...getTraceTableColors() }; }
+type ColorsType = ReturnType<typeof getCOLORS>;
+let COLORS: ColorsType = getCOLORS();
 
 const FONT = '12px "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace';
 const FONT_ITALIC = 'italic 12px "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace';
@@ -156,6 +159,7 @@ export default function TraceTable({
 }: Props) {
   const selectedSeqFromStore = useSelectedSeq();
   const selectedSeq = selectedSeqProp !== undefined ? selectedSeqProp : selectedSeqFromStore;
+  const _themeId = useThemeId(); // 触发主题切换时的重绘
 
   const [visibleLines, setVisibleLines] = useState<Map<number, TraceLine>>(
     new Map()
@@ -1590,6 +1594,7 @@ export default function TraceTable({
 
   // === 主绘制函数 ===
   const drawFrame = useCallback(() => {
+    COLORS = getCOLORS(); // 刷新当前主题颜色
     const canvas = canvasRef.current;
     if (!canvas || !fontReady) return;
     const ctxOrNull = canvas.getContext("2d");
@@ -2205,7 +2210,7 @@ export default function TraceTable({
       visibleLines, selectedSeq, arrowState, effectiveChangesWidth, fontReady,
       blLineMap, isFolded, finalSeqToVirtualIndex, toggleFold, multiSelect, ctrlSelect, highlights,
       sliceActive, sliceStatuses, sliceSourceSeq, taintFilterActive,
-      COL_ADDR, COL_DISASM]);
+      COL_ADDR, COL_DISASM, _themeId]);
 
   // drawFrame 通过 ref 暴露给 RAF 循环，避免 RAF useEffect 因 drawFrame 重建而重启导致掉帧
   const drawFrameRef = useRef(drawFrame);

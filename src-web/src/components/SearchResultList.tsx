@@ -138,7 +138,7 @@ export default function SearchResultList({
                     background: isSelected ? "var(--bg-selected)"
                       : vRow.index % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)",
                   }}
-                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = vRow.index % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)"; }}
                 >
                   <span style={{ width: 48, flexShrink: 0 }}></span>

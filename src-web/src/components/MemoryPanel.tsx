@@ -651,7 +651,7 @@ export default function MemoryPanel({ selectedSeq: selectedSeqProp, isPhase2Read
                               : vRow.index % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)",
                             whiteSpace: "nowrap",
                           }}
-                          onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                          onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = "var(--bg-hover)"; }}
                           onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = vRow.index % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)"; }}
                         >
                           <span style={{ width: 90, color: "var(--text-secondary)", flexShrink: 0 }}>#{rec.seq + 1}</span>
