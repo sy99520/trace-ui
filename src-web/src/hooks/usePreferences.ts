@@ -11,6 +11,7 @@ export interface Preferences {
   cacheDir: string; // empty string = use default path
   scanStringsOnBuild: boolean;
   theme: ThemeId;
+  confirmTaintRestore: boolean;
 }
 
 export interface TaintConfig {
@@ -40,6 +41,7 @@ const DEFAULTS: Preferences = {
   cacheDir: "",
   scanStringsOnBuild: true,
   theme: "dark",
+  confirmTaintRestore: true,
 };
 
 function load(): Preferences {

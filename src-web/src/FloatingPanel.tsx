@@ -157,6 +157,14 @@ export default function FloatingPanel({ panel }: { panel: string }) {
     emit("action:jump-to-seq", { seq });
   }, []);
 
+  const handleJumpToSearchMatch = useCallback((match: SearchMatch) => {
+    if (match.call_info) {
+      emit("action:jump-to-search-match", { seq: match.seq });
+      return;
+    }
+    handleJumpToSeq(match.seq);
+  }, [handleJumpToSeq]);
+
   const renderPanelContent = () => {
     switch (panel) {
       case "memory":
@@ -176,6 +184,7 @@ export default function FloatingPanel({ panel }: { panel: string }) {
             isSearching={isSearching}
             searchStatus={searchStatus}
             onJumpToSeq={handleJumpToSeq}
+            onJumpToMatch={handleJumpToSearchMatch}
             onSearch={handleSearch}
           />
         );
@@ -221,13 +230,14 @@ export default function FloatingPanel({ panel }: { panel: string }) {
 
 function FloatingSearchContent({
   searchResults, searchQuery, isSearching, searchStatus,
-  onJumpToSeq, onSearch,
+  onJumpToSeq, onJumpToMatch, onSearch,
 }: {
   searchResults: SearchMatch[];
   searchQuery: string;
   isSearching: boolean;
   searchStatus: string;
   onJumpToSeq: (seq: number) => void;
+  onJumpToMatch: (match: SearchMatch) => void;
   onSearch: (query: string) => void;
 }) {
   const [localQuery, setLocalQuery] = useState(searchQuery);
@@ -306,7 +316,7 @@ function FloatingSearchContent({
       ) : searchResults.length === 0 ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-            {searchQuery ? "No results" : "Enter search query and press Enter"}
+            {searchQuery ? `No results found for "${searchQuery}"` : "Enter search query and press Enter"}
           </span>
         </div>
       ) : (
@@ -315,6 +325,7 @@ function FloatingSearchContent({
             results={searchResults}
             selectedSeq={null}
             onJumpToSeq={onJumpToSeq}
+            onJumpToMatch={onJumpToMatch}
           />
         </div>
       )}
