@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useDragToFloat } from "../hooks/useDragToFloat";
-import { useResizableColumn } from "../hooks/useResizableColumn";
 import type { SearchMatch, SliceResult } from "../types/trace";
 import MemoryPanel from "./MemoryPanel";
 import SearchResultList from "./SearchResultList";
@@ -48,7 +47,6 @@ export default function TabPanel({
   stringsScanning,
 }: Props) {
   const [active, setActive] = useState<TabName>("Memory");
-  const changesCol = useResizableColumn(Math.min(300, Math.round(window.innerWidth * 0.2)));
   const [memResetKey, setMemResetKey] = useState(0);
 
   // 过滤已浮动的 tab
@@ -169,8 +167,6 @@ export default function TabPanel({
               results={searchResults}
               onJumpToSeq={onJumpToSeq}
               onJumpToMatch={onJumpToSearchMatch}
-              changesWidth={changesCol.width}
-              onResizeChanges={changesCol.onMouseDown}
             />
             {searchStatus && (
               <div style={{

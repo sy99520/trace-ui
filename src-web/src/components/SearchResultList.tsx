@@ -6,6 +6,7 @@ import DisasmHighlight from "./DisasmHighlight";
 import Minimap, { MINIMAP_WIDTH } from "./Minimap";
 import { useSelectedSeq } from "../stores/selectedSeqStore";
 import CustomScrollbar from "./CustomScrollbar";
+import { useResizableColumn } from "../hooks/useResizableColumn";
 
 const BASE_ROW_HEIGHT = 22;
 const DETAIL_LINE_HEIGHT = 16;
@@ -62,8 +63,6 @@ interface SearchResultListProps {
   selectedSeq?: number | null;
   onJumpToSeq: (seq: number) => void;
   onJumpToMatch?: (match: SearchMatch) => void;
-  changesWidth?: number;
-  onResizeChanges?: (e: React.MouseEvent) => void;
 }
 
 export default function SearchResultList({
@@ -71,9 +70,19 @@ export default function SearchResultList({
   selectedSeq: selectedSeqProp,
   onJumpToSeq,
   onJumpToMatch,
-  changesWidth = 300,
-  onResizeChanges,
 }: SearchResultListProps) {
+  const rwCol = useResizableColumn(30, "right", 20, "search:rw");
+  const seqCol = useResizableColumn(90, "right", 50, "search:seq");
+  const addrCol = useResizableColumn(90, "right", 50, "search:addr");
+  const changesCol = useResizableColumn(
+    Math.min(300, Math.round(window.innerWidth * 0.2)), "left", 40, "search:changes"
+  );
+
+  const HANDLE_STYLE: React.CSSProperties = {
+    width: 8, cursor: "col-resize", flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  };
+
   const selectedSeqFromStore = useSelectedSeq();
   const selectedSeq = selectedSeqProp !== undefined ? selectedSeqProp : selectedSeqFromStore;
 
@@ -185,26 +194,15 @@ export default function SearchResultList({
         flexShrink: 0,
       }}>
         <span style={{ width: 48, flexShrink: 0 }}></span>
-        <span style={{ width: 30, flexShrink: 0 }}>R/W</span>
-        <span style={{ width: 90, flexShrink: 0 }}>#</span>
-        <span style={{ width: 90, flexShrink: 0 }}>Address</span>
+        <span style={{ width: rwCol.width, flexShrink: 0 }}>R/W</span>
+        <div onMouseDown={rwCol.onMouseDown} style={HANDLE_STYLE} />
+        <span style={{ width: seqCol.width, flexShrink: 0 }}>#</span>
+        <div onMouseDown={seqCol.onMouseDown} style={HANDLE_STYLE} />
+        <span style={{ width: addrCol.width, flexShrink: 0 }}>Address</span>
+        <div onMouseDown={addrCol.onMouseDown} style={HANDLE_STYLE} />
         <span style={{ flex: 1 }}>Disassembly</span>
-        {onResizeChanges && (
-          <div
-            onMouseDown={onResizeChanges}
-            style={{
-              width: 8,
-              cursor: "col-resize",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div style={{ width: 1, height: "100%", background: "var(--border-color)" }} />
-          </div>
-        )}
-        <span style={{ width: changesWidth, flexShrink: 0 }}>Changes</span>
+        <div onMouseDown={changesCol.onMouseDown} style={HANDLE_STYLE} />
+        <span style={{ width: changesCol.width, flexShrink: 0 }}>Changes</span>
         <span style={{ width: MINIMAP_WIDTH + 12, flexShrink: 0 }}></span>
       </div>
 
@@ -266,11 +264,14 @@ export default function SearchResultList({
                     padding: "0 8px",
                   }}>
                     <span style={{ width: 48, flexShrink: 0 }}></span>
-                    <span style={{ width: 30, flexShrink: 0, color: "var(--text-secondary)" }}>
+                    <span style={{ width: rwCol.width, flexShrink: 0, color: "var(--text-secondary)" }}>
                       {match.mem_rw === "W" ? "W" : match.mem_rw === "R" ? "R" : ""}
                     </span>
-                    <span style={{ width: 90, flexShrink: 0, color: "var(--text-secondary)" }}>{match.seq + 1}</span>
-                    <span style={{ width: 90, flexShrink: 0, color: "var(--text-address)" }}>{match.address}</span>
+                    <span style={{ width: 8, flexShrink: 0 }} />
+                    <span style={{ width: seqCol.width, flexShrink: 0, color: "var(--text-secondary)" }}>{match.seq + 1}</span>
+                    <span style={{ width: 8, flexShrink: 0 }} />
+                    <span style={{ width: addrCol.width, flexShrink: 0, color: "var(--text-address)" }}>{match.address}</span>
+                    <span style={{ width: 8, flexShrink: 0 }} />
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <DisasmHighlight text={match.disasm} />
                       {match.call_info && (
@@ -288,9 +289,10 @@ export default function SearchResultList({
                         </span>
                       )}
                     </span>
+                    <span style={{ width: 8, flexShrink: 0 }} />
                     <span
                       style={{
-                        width: changesWidth,
+                        width: changesCol.width,
                         color: "var(--text-changes)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
